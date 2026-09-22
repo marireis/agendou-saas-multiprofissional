@@ -119,3 +119,13 @@ stateDiagram-v2
 - `PaymentTransaction` possui unicidade de referencia bancaria por tenant/conta quando aplicavel.
 - `SubscriptionEvent` e `AuditLog` sao append-only.
 - Snapshots preservam preco, duracao, recebedor PIX e politica vigentes no momento da reserva.
+
+## Migrations efetivamente implementadas
+
+O quadro inicial acima é o plano de domínio. O histórico real até esta etapa é:
+
+- V001: tenants, plans, subscriptions e subscription_events.
+- V002: role de runtime separada e RLS forçada nas tabelas de negócio.
+- V003: usuários, memberships, tokens, outbox SMTP, sessões JDBC, perfil inicial e constraints adicionais de assinatura/eventos.
+
+As próximas migrations devem continuar a numeração existente, sem reutilizar versões do quadro planejado.

@@ -9,5 +9,6 @@ package br.com.agendou.web;
  * por requisicao (arquitetura, secao 7) ainda nao existe e fica fora do
  * escopo desta mudanca.</p>
  */
-public record ApiErrorResponse(String code, String message, String correlationId) {
+public record ApiErrorResponse(String code, String message,
+    @com.fasterxml.jackson.annotation.JsonProperty("correlation_id") String correlationId) {
 }

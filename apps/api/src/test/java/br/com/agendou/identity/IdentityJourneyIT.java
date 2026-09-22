@@ -49,23 +49,32 @@ class IdentityJourneyIT {
   String token=body.split("token=")[1].split("\\n")[0];
   mvc.perform(post("/api/v1/auth/verify").with(csrf()).contentType("application/json").content("{\"token\":\""+token+"\"}")).andExpect(status().isOk());
   mvc.perform(post("/api/v1/auth/verify").with(csrf()).contentType("application/json").content("{\"token\":\""+token+"\"}")).andExpect(status().isBadRequest());
-  MockHttpSession session=(MockHttpSession)mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json").content(login)).andExpect(status().isOk()).andReturn().getRequest().getSession(false);
-  mvc.perform(get("/api/v1/admin/subscription").session(session)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRIAL_ACTIVE"));
-  mvc.perform(get("/api/v1/subscriptions/"+UUID.randomUUID()).session(session)).andExpect(status().isNotFound());
-  mvc.perform(post("/api/v1/subscriptions/"+tenant+"/confirm-payment").session(session).with(csrf())).andExpect(status().isForbidden());
+  jakarta.servlet.http.Cookie session=mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json").content(login)).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(get("/api/v1/admin/subscription").cookie(session)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRIAL_ACTIVE"));
+  mvc.perform(get("/api/v1/subscriptions/"+UUID.randomUUID()).cookie(session)).andExpect(status().isNotFound());
+  mvc.perform(post("/api/v1/subscriptions/"+tenant+"/confirm-payment").cookie(session).with(csrf())).andExpect(status().isForbidden());
   String edit="{\"name\":\"Studio Preservado\",\"description\":\"Minha descricao\",\"timezone\":\"America/Sao_Paulo\"}";
-  mvc.perform(patch("/api/v1/admin/profile").session(session).with(csrf()).contentType("application/json").content(edit)).andExpect(status().isOk());
+  mvc.perform(patch("/api/v1/admin/profile").cookie(session).with(csrf()).contentType("application/json").content(edit)).andExpect(status().isOk());
   var end=Instant.now().minusSeconds(60);
   owner().update("UPDATE subscriptions SET trial_started_at=?,trial_ends_at=? WHERE tenant_id=?",Timestamp.from(end.minusSeconds(7*86400)),Timestamp.from(end),tenant);
   expiration.expire();
-  mvc.perform(get("/api/v1/admin/subscription").session(session)).andExpect(jsonPath("$.status").value("TRIAL_EXPIRED_BLOCKED"));
-  mvc.perform(patch("/api/v1/admin/profile").session(session).with(csrf()).contentType("application/json").content(edit)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/admin/subscription").cookie(session)).andExpect(jsonPath("$.status").value("TRIAL_EXPIRED_BLOCKED"));
+  mvc.perform(patch("/api/v1/admin/profile").cookie(session).with(csrf()).contentType("application/json").content(edit)).andExpect(status().isForbidden());
   TenantContext.set(tenant);try{subscriptions.confirmPayment(tenant);}finally{TenantContext.clear();}
-  mvc.perform(get("/api/v1/admin/subscription").session(session)).andExpect(jsonPath("$.status").value("PAID_ACTIVE"));
-  mvc.perform(get("/api/v1/admin/profile").session(session)).andExpect(jsonPath("$.name").value("Studio Preservado"));
+  mvc.perform(get("/api/v1/admin/subscription").cookie(session)).andExpect(jsonPath("$.status").value("PAID_ACTIVE"));
+  mvc.perform(get("/api/v1/admin/profile").cookie(session)).andExpect(jsonPath("$.name").value("Studio Preservado"));
   mvc.perform(post("/api/v1/auth/register").with(csrf()).contentType("application/json").content(registration)).andExpect(status().isAccepted());
   assertThat(owner().queryForObject("SELECT count(*) FROM subscriptions WHERE tenant_id=?",Long.class,tenant)).isEqualTo(1);
-  mvc.perform(post("/api/v1/auth/logout").session(session).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(post("/api/v1/auth/password-reset").with(csrf()).contentType("application/json").content("{\"email\":\""+email+"\"}")).andExpect(status().isAccepted());
+  String resetBody=owner().queryForObject("SELECT body FROM mail_outbox WHERE recipient=? AND body LIKE '%/recuperar%'",String.class,email);
+  String resetToken=resetBody.split("token=")[1].split("\\n")[0];
+  mvc.perform(post("/api/v1/auth/password-reset/confirm").with(csrf()).contentType("application/json").content("{\"token\":\""+resetToken+"\",\"password\":\"new-strong-password\"}")).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/admin/subscription").cookie(session)).andExpect(status().isUnauthorized());
+  mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json").content(login)).andExpect(status().isUnauthorized());
+  var newSession=mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json").content(login.replace("strong-password-123","new-strong-password"))).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(post("/api/v1/auth/logout").cookie(newSession).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(get("/api/v1/admin/subscription").cookie(newSession)).andExpect(status().isUnauthorized());
   mvc.perform(get("/api/v1/admin/subscription")).andExpect(status().isUnauthorized());
  }
 }
+

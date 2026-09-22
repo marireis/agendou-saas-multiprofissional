@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
+import Brand from "./Brand";
 type Mode = "cadastro" | "entrar" | "verificar" | "recuperar";
 export default function AccountForm({ mode }: { mode: Mode }) {
   const [token, setToken] = useState("");
@@ -22,7 +23,7 @@ export default function AccountForm({ mode }: { mode: Mode }) {
       }
     } catch (err) { setError(err instanceof Error ? err.message : "Serviço indisponível."); } finally { setBusy(false); }
   }
-  return <main className="account-shell"><a className="brand-mark" href="/">agendou</a><section className="account-card"><h1>{titles[mode]}</h1>
+  return <main className="account-shell"><Brand /><p className="account-slogan">Seu cliente agenda.<br />Você cuida do seu negócio.</p><section className="account-card"><h1>{titles[mode]}</h1>
     {mode === "cadastro" && <p>Teste o Premium/Top. Seus dados ficam preservados após o teste.</p>}
     <form onSubmit={submit} aria-busy={busy}>
       {mode === "cadastro" && <><label>Nome do negócio<input name="name" required maxLength={100} autoComplete="organization" /></label><label>Endereço da sua página<input name="slug" required minLength={3} maxLength={60} pattern="[a-z0-9]+(-[a-z0-9]+)*" aria-describedby="slug-help" /></label><small id="slug-help">Use letras minúsculas, números e hífens.</small></>}
@@ -35,3 +36,4 @@ export default function AccountForm({ mode }: { mode: Mode }) {
     <nav className="account-links"><a href="/entrar">Entrar</a><a href="/cadastro">Criar conta</a><a href="/recuperar">Esqueci minha senha</a></nav>
   </section></main>;
 }
+

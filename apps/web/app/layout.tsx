@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Agendou",
-  description: "SaaS de agendamento com trial Premium/Top de 7 dias"
+  description: "Seu cliente agenda. Você cuida do seu negócio."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -13,3 +13,4 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     </html>
   );
 }
+

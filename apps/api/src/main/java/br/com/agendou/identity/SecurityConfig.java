@@ -13,6 +13,9 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 @Configuration
 @EnableScheduling
 public class SecurityConfig {
+ @Bean org.springframework.security.core.userdetails.UserDetailsService userDetailsService() {
+  return username -> { throw new org.springframework.security.core.userdetails.UsernameNotFoundException("Use o fluxo de autenticacao da aplicacao."); };
+ }
  @Bean Clock clock() { return Clock.systemUTC(); }
  @Bean PasswordEncoder passwordEncoder() { return Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8(); }
  @Bean HttpSessionSecurityContextRepository securityContextRepository() { return new HttpSessionSecurityContextRepository(); }

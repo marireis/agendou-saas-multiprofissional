@@ -29,6 +29,7 @@ public class AuthController {
   var context=SecurityContextHolder.createEmptyContext();
   context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(user.toString(),null,List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
   SecurityContextHolder.setContext(context); contexts.saveContext(context,request,response);
+  new org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository().saveToken(null,request,response);
  }
  @PostMapping("/password-reset") @ResponseStatus(org.springframework.http.HttpStatus.ACCEPTED)
  public void requestReset(@Valid @RequestBody Email body) { auth.requestReset(body.email()); }

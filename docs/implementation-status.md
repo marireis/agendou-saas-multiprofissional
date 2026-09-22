@@ -1,75 +1,82 @@
-# Agendou - Status de implementacao
+# Agendou - Status de implementação
 
-**Data:** 22/09/2026  
-**Base:** `exports/DELTA_Agendou_DUAL_2026-09-22` e `docs/`.
+**Atualizado em:** 22/09/2026. Desenvolvimento realizado diretamente na pasta original do projeto.
 
-## Capability de codigo aplicada
+## Revisão do estado anterior
 
-Esta Task envolve desenvolvimento de software. A capability recomendada e explicitamente referenciada e o TLC Spec-Driven Development, variante especializada Bradesco, datada de 07/07/2026. Nesta execucao, ela foi aplicada como disciplina de saida: escopo rastreavel, artefatos de engenharia, criterios e validacao separados. Specs geradas ou codigo inicial nao representam implementacao final validada; PASS tecnico nao equivale a VERIFIED.
+A documentação descrevia um scaffold, mas já existiam arquivos JDBC, contexto de tenant e testes de integração adicionados posteriormente. A revisão encontrou:
 
-## O que foi implementado
+- Repositórios em memória e JDBC registrados simultaneamente.
+- Dependências Testcontainers e suporte Flyway/PostgreSQL ausentes; testes `*IT` fora do ciclo de build.
+- Configuração ainda conectando com a role de migração, apesar da role restrita criada em V002.
+- Tenant aceito da URL sem autenticação/membership; confirmação pública de pagamento.
+- Serialização de assinatura sem DTO próprio.
+- Política de trial capaz de sobrescrever suspensão/cancelamento.
+- Teste RLS configurando tenant em uma conexão e consultando em outra, sem provar o isolamento pretendido.
 
-| Item | Estado | Arquivos |
-|---|---|---|
-| Estrutura base do repositorio | Feito | `apps/api`, `apps/web`, `contracts`, `infra/local`, `docs/adr` |
-| Backend Spring Boot inicial | Feito | `apps/api/pom.xml`, `ApiApplication`, `HealthController` |
-| Dominio inicial de trial | Feito | `PlanCode`, `SubscriptionStatus`, `Subscription`, `TrialPolicy`, `SubscriptionService` |
-| API inicial de assinatura | Feito | `SubscriptionController` |
-| Migration inicial | Feito | `V001__identity_billing_foundation.sql` |
-| Testes unitarios planejados para trial | Feito | `TrialPolicyTest` |
-| Contrato OpenAPI inicial | Feito | `contracts/openapi.yaml` |
-| Frontend Next.js responsivo | Feito | `apps/web/app/page.tsx`, `globals.css`, `layout.tsx` |
-| Dependencias web instaladas | Feito | `apps/web/package-lock.json`, `node_modules` local |
-| Infra local | Feito | `infra/local/compose.yaml` |
-| ADRs iniciais | Feito | `ADR-0001`, `ADR-0002` |
+Esses pontos foram corrigidos. Na inspeção inicial a pasta não era um repositório Git; durante a execução passou a existir um repositório com o commit `652d9a7`. Nenhuma branch, commit ou publicação foi criada por esta execução.
 
-## Backlog atualizado
+## Implementado e validado nesta etapa
 
-### Concluido nesta etapa
+| Entrega | Evidência |
+|---|---|
+| Maven 3.9.9 instalado e JDK 21.0.5 validado | `mvnw.cmd --version`; Wrapper oficial 3.3.2 gerado |
+| Persistência JDBC exclusiva | Repositório em memória removido; Flyway e runtime separados |
+| Contexto transacional e RLS | Runtime sem BYPASSRLS; testes PostgreSQL 17; contexto obrigatório por transação |
+| Cadastro de administrador | Usuário, membership, tenant, perfil, trial e outbox na mesma transação |
+| Verificação de email | Token aleatório, hash, 15 minutos e uso único |
+| Login/logout e sessão JDBC | Cookie HttpOnly/Secure/SameSite=Lax; CSRF; rotação do ID no login |
+| Recuperação de senha | Token de uso único e revogação das sessões persistidas |
+| Autorização por membership | Tenant derivado da identidade; acesso pela URL a outro tenant retorna 404 |
+| Trial Premium de 7 dias | Expiração periódica e síncrona; lock por tenant; eventos persistidos |
+| Bloqueio real | PATCH de perfil negado; consulta de perfil e assinatura preservada |
+| Reativação interna | Pagamento no serviço reativa sem recriar tenant/perfil; não há autoativação pública |
+| Perfil inicial | Nome, descrição e fuso IANA; consulta e alteração autenticadas |
+| Frontend conectado | Cadastro, verificação, login, recuperação e painel com assinatura real e edição de perfil |
+| Contrato/setup | OpenAPI atualizado, ADR-0003 e runbook local |
 
-- [x] **MVP-001:** registrar ADRs de stack, monolito modular, trial Premium/Top, bloqueio pos-trial e preservacao de dados.
-- [x] **MVP-003:** criar OpenAPI inicial com padrao inicial de endpoints de assinatura.
-- [x] **MVP-004:** inicializar repositorio com `apps/api`, `apps/web`, `contracts`, `infra`, `docs` e base de testes.
-- [x] **MVP-020:** criar base de Plan, Subscription e eventos no schema inicial.
-- [x] **MVP-021:** cadastrar planos Basico, Intermediario e Premium/Top na migration, com trial permitido somente no Premium/Top.
-- [x] **MVP-022:** implementar politica de `TRIAL_ACTIVE` por 7 dias no dominio.
-- [x] **MVP-023:** criar primeira tela responsiva exibindo trial e proposta de valor.
-- [x] **MVP-027:** implementar caminho base de confirmacao de pagamento para `PAID_ACTIVE` preservando tenant.
+## Evidências de validação
 
-### Parcialmente concluido
+| Comando/check | Resultado |
+|---|---|
+| `apps/api/mvnw.cmd verify` com Java 21 e Docker | PASS: 8 testes unitários + 5 testes de integração, 0 falhas, 0 ignorados |
+| Migrations V001, V002, V003 em PostgreSQL 17 | PASS via Testcontainers |
+| Jornada HTTP com Spring Security e cookie JDBC | PASS: cadastro, verificação, token reutilizado negado, login, tenant alheio negado, perfil, expiração, bloqueio, reativação, recuperação/revogação e logout |
+| RLS com role real | PASS: leitura do próprio tenant, rejeição de tenant divergente, isolamento SQL em uma mesma transação e negação sem contexto |
+| `npm run build` | PASS: páginas de cadastro, login, verificação, recuperação e painel |
+| `npm run typecheck` | PASS: TypeScript sem erros |
+| `npm install --package-lock-only --ignore-scripts` | PASS: versões instaladas fixadas; 0 vulnerabilidades reportadas nessa execução |
 
-- [~] **MVP-005:** Compose local e lockfile web criados; Maven Wrapper ainda depende da proxima etapa.
-- [~] **MVP-010:** entidades de assinatura e tenant iniciadas; identidade completa ainda nao implementada.
-- [~] **MVP-024:** regra de expiracao existe no dominio; worker agendado ainda nao implementado.
-- [~] **MVP-025:** estado bloqueado existe; enforcement em todas as rotas ainda nao implementado.
+Relatórios completos em `apps/api/target/surefire-reports` e `apps/api/target/failsafe-reports`. Logs locais em `apps/api/verification-final.log`. PASS técnico não equivale a homologação de negócio.
 
-### Proxima etapa recomendada
+## Backlog: alcance real
 
-1. Instalar/validar Maven ou adicionar Maven Wrapper oficial.
-2. Persistir `SubscriptionRepository` em PostgreSQL com JDBC.
-3. Implementar `TenantContext` com `SET LOCAL app.tenant_id` por transacao.
-4. Criar autenticação admin minima: cadastro, verificacao de email, login e sessao.
-5. Aplicar bloqueio `TRIAL_EXPIRED_BLOCKED` em endpoints reais, nao apenas na UI.
-6. Trocar repositorio em memoria por persistencia e adicionar testes Testcontainers.
-7. Conectar frontend ao endpoint `/api/v1/subscriptions/{tenantId}`.
+- **MVP-005:** Wrapper e lockfile concluídos; lint/formatter e setup completo de produção ainda pendentes.
+- **MVP-010/011/012/013:** identidade administrativa, sessão, recuperação, CSRF e membership implementados; PlatformRole/MFA e reenvio de verificação ainda pendentes.
+- **MVP-014:** RLS nas tabelas de negócio existentes; ampliar a cada nova tabela.
+- **MVP-015:** outbox SMTP com retries e Mailpit configurado; entrega real de email/SES e operação de falhas ainda não homologadas.
+- **MVP-016/023:** painel com assinatura e estados reais; observabilidade/correlation ID ponta a ponta ainda pendente.
+- **MVP-020/021/022/024:** planos, trial, eventos e expiração implementados; BillingDecision e auditoria administrativa completa ainda pendentes.
+- **MVP-025/026:** bloqueio aplicado ao perfil atual e consultas preservadas. Reservas/publicação/pagamento terão enforcement ao serem implementados.
+- **MVP-027:** serviço interno testado; falta fluxo administrativo autorizado com MFA e evidência da conferência.
+- **MVP-028:** email único impede novo cadastro/trial para a mesma conta; documento/telefone ainda não fazem parte do cadastro.
+- **MVP-030:** perfil inicial; contato, modalidade/local e progresso de onboarding pendentes.
 
-## Validacao executada
+## Próximas implementações
 
-| Check | Resultado | Observacao |
-|---|---|---|
-| `cd apps/web && npm install` | PASS | 28 pacotes instalados, 0 vulnerabilidades reportadas pelo npm. |
-| `cd apps/web && npm run build` | PASS | Build Next.js concluido com sucesso. |
-| `javac --release 21` no dominio puro de billing | PASS | Compilou `PlanCode`, `SubscriptionStatus`, `Subscription`, `TrialPolicy` e `SubscriptionRepository`. |
-| `cd apps/api && mvn test` | BLOQUEADO | Maven nao esta disponivel no ambiente atual. |
+1. Completar identidade: reenvio de verificação, rate limits e tratamento operacional da outbox.
+2. Criar PlatformRole/MFA e decisão auditada de pagamento/reativação; não reabrir confirmação pública.
+3. Implementar serviços, PIX, política e perfil público com critérios de publicação (MVP-030 a 035).
+4. Disponibilidade, alocação GiST e testes de concorrência (MVP-040 a 045).
+5. Reserva, acesso de cliente, idempotência, quota e expiração (MVP-050 a 056).
+6. Comprovantes privados, conferência e operação de PIX manual (MVP-060 a 068).
+7. E2E de navegador, acessibilidade, observabilidade, backup/restore e homologação antes de piloto.
 
-## Validacao pendente
+O produto completo ainda não está pronto para produção. Não foram implementados reservas, agenda, uploads, conferência PIX, plataforma com MFA ou deploy. Nenhuma cobrança ou mensagem externa real foi enviada. Credenciais fixas da V002/Compose são exclusivas de desenvolvimento local.
 
-- `cd apps/api && mvn test` quando Maven estiver disponivel.
-- Teste manual futuro: criar trial, avancar relogio, bloquear tenant e reativar com pagamento.
+Instruções de execução: [desenvolvimento local](runbooks/desenvolvimento-local.md).
 
-## Limitacoes atuais
+## Atualizacao visual do frontend
 
-- Maven nao estava disponivel no ambiente no momento do scaffold.
-- Java local encontrado e OpenJDK 25, enquanto o alvo do projeto e Java 21.
-- Backend ainda usa repositorio em memoria para a primeira fatia.
-- A implementacao ainda nao cobre reserva, PIX manual, agenda, isolamento completo e login.
+Home redesenhada a partir da referencia ClipCraft indicada pelo usuario: tema escuro, verde-agua, slogan 'Seu cliente agenda. Voce cuida do seu negocio.', previa ilustrativa, vantagens, como funciona e perguntas frequentes. Logo original preservada em assets/agendou-logo.svg; variante para fundo escuro em apps/web/public/agendou-logo-dark.svg. Cadastro, login e painel compartilham a marca e os estilos. Build Next.js aprovado e verificacao visual desktop/mobile realizada, incluindo logo, ausencia de overflow horizontal e link de cadastro. A ilustracao de agenda nao representa reserva funcional implementada.
+

@@ -129,3 +129,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [ ] **MVP-085:** decidir continuar, corrigir ou ampliar com base nos criterios de validacao.
 
 **Saida:** piloto acompanhado e decisao de continuidade registrada.
+
+## Evidencias de execucao
+
+O checklist acima representa o escopo completo. Consulte [implementation-status.md](implementation-status.md) para entregas efetivamente implementadas, parciais e validadas em 22/09/2026; itens amplos nao devem ser marcados completos apenas pela existencia de scaffold.
+

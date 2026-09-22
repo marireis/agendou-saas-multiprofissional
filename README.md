@@ -1,34 +1,24 @@
 # Agendou
 
-MVP de SaaS de agendamento baseado no DELTA exportado em `exports/DELTA_Agendou_DUAL_2026-09-22`.
+SaaS de agendamento em desenvolvimento, com Spring Boot/Java 21, PostgreSQL e Next.js.
 
-## Escopo desta base
+A etapa atual implementa cadastro e verificação de administrador, sessão JDBC, recuperação de senha, isolamento por tenant, trial Premium/Top de sete dias, bloqueio e perfil inicial. Reservas e PIX manual continuam no backlog.
 
-- Backend Spring Boot em `apps/api` com dominio inicial de trial Premium/Top.
-- Frontend Next.js em `apps/web` com tela inicial responsiva.
-- Contrato OpenAPI inicial em `contracts/openapi.yaml`.
-- Infra local em `infra/local/compose.yaml`.
-- ADRs iniciais em `docs/adr`.
-- Status de implementacao em `docs/implementation-status.md`.
+- [Estado real e próximas etapas](docs/implementation-status.md)
+- [Como executar e testar no Windows](docs/runbooks/desenvolvimento-local.md)
+- [Backlog completo](docs/backlog.md)
+- [Contrato OpenAPI](contracts/openapi.yaml)
 
-## Regra comercial central
+## Validação
 
-O teste gratis existe somente no plano Premium/Top, dura 7 dias e bloqueia o tenant caso nao haja pagamento confirmado. A configuracao, pagina e historico devem ser preservados para reativacao apos pagamento.
-
-## Comandos previstos
-
-Frontend:
-
-```bash
-cd apps/web
-npm install
+```powershell
+$env:JAVA_HOME = 'C:\Users\maryn\.jdks\corretto-21.0.5'
+cd apps/api
+.\mvnw.cmd verify
+cd ../web
+npm ci
+npm run typecheck
 npm run build
 ```
 
-Backend, quando Maven estiver disponivel:
-
-```bash
-cd apps/api
-mvn test
-mvn spring-boot:run
-```
+Docker Desktop deve estar iniciado para `verify`, que inclui PostgreSQL real via Testcontainers. O Maven Wrapper oficial instala/seleciona Maven 3.9.9 automaticamente. Para HTTP local, usar `AGENDOU_SECURE_COOKIE=false` conforme o runbook; cookies Secure são o padrão.
