@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: agendou-api
+  datasource:
+    url: ${AGENDOU_DATABASE_URL:jdbc:postgresql://localhost:5432/agendou}
+    username: ${AGENDOU_DATABASE_USER:agendou_runtime}
+    password: ${AGENDOU_DATABASE_PASSWORD:agendou_runtime_local_only}
+  flyway:
+    enabled: true
+    url: ${AGENDOU_DATABASE_URL:jdbc:postgresql://localhost:5432/agendou}
+    user: ${AGENDOU_MIGRATION_USER:agendou_app}
+    password: ${AGENDOU_MIGRATION_PASSWORD:agendou_app}
+  session:
+    jdbc:
+      initialize-schema: never
+  mail:
+    host: ${AGENDOU_MAIL_HOST:localhost}
+    port: ${AGENDOU_MAIL_PORT:1025}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+server:
+  port: ${PORT:8080}
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        secure: ${AGENDOU_SECURE_COOKIE:true}
+        same-site: lax
+agendou:
+  public-url: ${AGENDOU_PUBLIC_URL:http://localhost:3000}
+  mail-from: ${AGENDOU_MAIL_FROM:no-reply@agendou.local}
