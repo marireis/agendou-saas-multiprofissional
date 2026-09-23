@@ -21,7 +21,7 @@ import org.springframework.mock.web.MockHttpSession;
 import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 
-@SpringBootTest(properties={"agendou.mail-worker-delay=3600000","agendou.trial-worker-delay=3600000"})
+@SpringBootTest(properties={"agendou.mail-worker-delay=3600000","agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000"})
 @AutoConfigureMockMvc
 @Testcontainers
 class IdentityJourneyIT {

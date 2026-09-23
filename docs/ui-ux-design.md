@@ -55,6 +55,8 @@ Agendou deve parecer um produto SaaS moderno, direto e confiavel para pequenos n
 - Reservas e detalhe.
 - Conferencia de PIX.
 - Clientes.
+- Financeiro do profissional (recebimentos, saldos e devolucoes, independente da assinatura do SaaS).
+- Compartilhar pagina publicada: copiar link e editar mensagem para abrir no WhatsApp, sem envio automatico.
 - Assinatura e pagamento.
 
 ### Super admin

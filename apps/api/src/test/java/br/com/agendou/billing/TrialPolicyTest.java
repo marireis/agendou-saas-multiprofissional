@@ -12,6 +12,12 @@ import org.junit.jupiter.api.Test;
 class TrialPolicyTest {
     private final Instant base = Instant.parse("2026-09-22T10:00:00Z");
 
+    @Test void paidSubscriptionExpiresExactlyAtDeadlineWithoutGrace() {
+        var subscription=new Subscription(UUID.randomUUID(),PlanCode.BASIC,SubscriptionStatus.PAID_ACTIVE,null,null,base);
+        assertThat(new TrialPolicy(Clock.fixed(base.minusSeconds(1),ZoneOffset.UTC)).refreshStatus(subscription).status()).isEqualTo(SubscriptionStatus.PAID_ACTIVE);
+        assertThat(new TrialPolicy(Clock.fixed(base,ZoneOffset.UTC)).refreshStatus(subscription).status()).isEqualTo(SubscriptionStatus.PAST_DUE);
+    }
+
     @Test
     void preservesAdministrativeStatesWithoutTrialDates() {
         TrialPolicy policy = new TrialPolicy(Clock.fixed(base, ZoneOffset.UTC));

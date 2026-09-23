@@ -164,6 +164,30 @@ class JdbcSubscriptionRepositoryIT {
         );
     }
 
+    @Test
+    void upgradingLegacyOutboxPreservesIdentityAndTrial() {
+        String database = "upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        ownerJdbcTemplate.execute("CREATE DATABASE " + database);
+        String url = POSTGRES.getJdbcUrl().replace("/" + POSTGRES.getDatabaseName(), "/" + database);
+        Flyway.configure().dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
+            .locations("classpath:db/migration").target("3").load().migrate();
+        var legacy = new JdbcTemplate(dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword()));
+        UUID user = UUID.randomUUID(), tenant = UUID.randomUUID(), message = UUID.randomUUID();
+        legacy.update("INSERT INTO app_users(id,email,password_hash) VALUES (?, 'legacy@example.test', 'synthetic')", user);
+        legacy.update("INSERT INTO tenants(id,slug,display_name,status) VALUES (?, 'legacy', 'Legacy', 'ACTIVE')", tenant);
+        legacy.update("INSERT INTO subscriptions(id,tenant_id,plan_code,status,trial_started_at,trial_ends_at) VALUES (?,?,'PREMIUM_TOP','TRIAL_ACTIVE',now(),now()+interval '7 days')", UUID.randomUUID(), tenant);
+        legacy.update("INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at) VALUES ('synthetic-hash',?,'VERIFY',now()+interval '15 minutes')", user);
+        legacy.update("INSERT INTO mail_outbox(id,recipient,subject,body) VALUES (?, 'legacy@example.test','Test','Synthetic link')", message);
+        var trial = legacy.queryForMap("SELECT * FROM subscriptions WHERE tenant_id=?", tenant);
+        Flyway.configure().dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
+            .locations("classpath:db/migration").load().migrate();
+        assertThat(legacy.queryForMap("SELECT * FROM subscriptions WHERE tenant_id=?", tenant)).isEqualTo(trial);
+        assertThat(legacy.queryForObject("SELECT count(*) FROM app_users WHERE id=?", Long.class, user)).isEqualTo(1);
+        assertThat(legacy.queryForObject("SELECT count(*) FROM auth_tokens WHERE user_id=?", Long.class, user)).isEqualTo(1);
+        var mail = legacy.queryForMap("SELECT status,recipient,body FROM mail_outbox WHERE id=?", message);
+        assertThat(mail).containsEntry("status", "EXPIRED").containsEntry("recipient", "").containsEntry("body", "");
+    }
+
     private static UUID createTenant(String slug) {
         UUID id = UUID.randomUUID();
         ownerJdbcTemplate.update(

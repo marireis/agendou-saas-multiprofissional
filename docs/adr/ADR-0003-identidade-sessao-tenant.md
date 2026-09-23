@@ -13,8 +13,8 @@ O scaffold recebia tenant pela URL sem conferir identidade e permitia confirmar 
 - Tenant vem da membership do usuario autenticado; URL divergente retorna 404. SET LOCAL exige transacao ativa e runtime sem BYPASSRLS.
 - Roles globais de identidade e fila nao sao expostas por CRUD generico. Tabelas de negocio sao protegidas por RLS.
 - Trial expira em worker e na consulta operacional. Lock do tenant serializa mudancas de assinatura e operacoes protegidas. Eventos append-only registram transicoes.
-- Confirmacao de pagamento permanece interna; nao existe endpoint publico de autoativacao. Endpoint de plataforma depende de MFA e auditoria administrativa futura.
+- Na entrega original, confirmacao de pagamento permaneceu interna. A ADR-0005 adiciona endpoint de plataforma protegido por MFA e auditoria; autoativacao publica continua negada.
 
 ## Limites
 
-Antes de piloto: MFA e operacao de plataforma, rate limits, reenvio de verificacao expirada, observabilidade/reprocessamento da outbox, isolamento de privilegios das tabelas globais e endurecimento de deploy. Defaults de banco e SMTP sao somente locais. Nao existe provedor de pagamento ou envio externo configurado.
+Reenvio, limites e ciclo da outbox foram implementados na ADR-0004 (23/09); MFA e painel minimo de plataforma na ADR-0005. Antes de piloto: homologacao do MFA, observabilidade/alertas, revisao de privilegios globais e endurecimento de deploy. Defaults de banco e SMTP sao somente locais. Nao existe provedor de pagamento ou envio externo configurado.

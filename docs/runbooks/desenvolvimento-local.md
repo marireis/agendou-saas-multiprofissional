@@ -4,6 +4,8 @@ Execute na pasta original do Agendou. JDK 21 e Docker Desktop sao necessarios.
 
 ## Backend
 
+Com superadmin/MFA, prefira iniciar pela raiz: `powershell -NoProfile -File infra/local/start-api.ps1`. Se estiver em `apps/api`, use `powershell -NoProfile -File ../../infra/local/start-api.ps1`. O script configura Java e reutiliza a chave MFA protegida pelo Windows. Detalhes em [superadmin](superadmin.md).
+
 ```powershell
 $env:JAVA_HOME = 'C:\Users\maryn\.jdks\corretto-21.0.5'
 docker compose -f infra/local/compose.yaml up -d postgres mailpit
@@ -48,3 +50,7 @@ npm run build
 - Nao executar `docker compose down -v` se quiser preservar os dados.
 
 Os testes de integracao usam bancos descartaveis e emails sinteticos. A jornada testa expiracao alterando datas somente nesse banco, sem endpoints de teste na aplicacao.
+
+## Atualizacao de 23/09/2026
+
+Reinicie a API pelo script acima para aplicar V004/V005 via Flyway e carregar reenvio, limites e plataforma/MFA. Emails antigos ainda pendentes sao expirados na V004; solicitar outro em /verificar. Contas e configuracoes sao preservadas. Veja [email indisponivel](email-indisponivel.md) para diagnostico. O procedimento local de 23/09 aplicou V004/V005 no banco existente sem apagar volumes.

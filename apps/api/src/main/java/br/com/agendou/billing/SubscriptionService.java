@@ -36,11 +36,11 @@ public class SubscriptionService {
   Subscription refreshed=policy.refreshStatus(subscription);
   if(refreshed.status()!=subscription.status()) {
    repository.save(refreshed); event(tenant,refreshed.status().name());
-   if(refreshed.status()==SubscriptionStatus.TRIAL_EXPIRED_BLOCKED) jdbc.update("UPDATE subscriptions SET blocked_at=? WHERE tenant_id=?",java.sql.Timestamp.from(clock.instant()),tenant);
+   if(refreshed.status()==SubscriptionStatus.TRIAL_EXPIRED_BLOCKED || refreshed.status()==SubscriptionStatus.PAST_DUE) jdbc.update("UPDATE subscriptions SET blocked_at=? WHERE tenant_id=?",java.sql.Timestamp.from(clock.instant()),tenant);
   }
   return refreshed;
  }
- // Uso interno apenas; nao exposto ate existir autorizacao de plataforma com MFA.
+ // Called by the platform service only after role/MFA checks and inside its audited transaction.
  @Transactional public Subscription confirmPayment(UUID tenant) {
   Subscription subscription=current(tenant);
   if(subscription.status()==SubscriptionStatus.SUSPENDED || subscription.status()==SubscriptionStatus.CANCELED)

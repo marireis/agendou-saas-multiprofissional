@@ -129,3 +129,7 @@ O quadro inicial acima é o plano de domínio. O histórico real até esta etapa
 - V003: usuários, memberships, tokens, outbox SMTP, sessões JDBC, perfil inicial e constraints adicionais de assinatura/eventos.
 
 As próximas migrations devem continuar a numeração existente, sem reutilizar versões do quadro planejado.
+
+- V005: platform_roles (runtime somente leitura), platform_mfa (segredo cifrado, versao e consumo TOTP), billing_decisions (RLS, referencia unica, estados antes/depois), platform_audit (metadados append-only para runtime) e funcao de listagem restrita. Sem BYPASSRLS para a aplicacao. Provisionamento nao altera usuarios, perfis ou trials.
+
+- V004: contadores globais de autenticacao e ciclo de vida da outbox, com status, finalidade, vinculo ao usuario/token, validade e diagnostico sem dados sensiveis. Tabelas globais de infraestrutura nao aceitam tenant fornecido pelo cliente e nao possuem CRUD publico.

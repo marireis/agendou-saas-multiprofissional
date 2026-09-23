@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.2.0
+  version: 0.4.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
@@ -17,6 +17,8 @@ paths:
     get:
       security: []
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '200':
           description: Token e nome do header CSRF; guardar o cookie de sessao
           content:
@@ -42,9 +44,31 @@ paths:
                 name: {type: string, minLength: 1, maxLength: 100}
                 slug: {type: string, minLength: 3, maxLength: 60, pattern: '[a-z0-9]+(?:-[a-z0-9]+)*'}
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '202': {description: Resposta generica; cadastro novo cria tenant e trial Premium de 7 dias atomicamente}
         '409': {description: Slug indisponivel ou conflito de cadastro}
         '422': {description: Campos invalidos}
+  /auth/verification-email:
+    post:
+      security: []
+      summary: Solicitar novo link de verificacao sem reiniciar o trial
+      description: Resposta generica para conta inexistente, verificada ou aguardando verificacao. Reenvios em menos de 60 segundos sao agrupados. Novo token revoga o anterior.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+      responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '202': {description: Solicitacao recebida, sem confirmar existencia da conta}
+        '403': {description: CSRF ausente ou invalido}
+        '422': {description: Email invalido}
   /auth/login:
     post:
       security: []
@@ -59,6 +83,8 @@ paths:
                 email: {type: string, format: email}
                 password: {type: string, maxLength: 64}
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '200': {description: Sessao JDBC criada; cookie SESSION HttpOnly, Secure e SameSite=Lax. Obter novo CSRF depois do login.}
         '401': {description: Credenciais invalidas ou email nao verificado}
   /auth/verify:
@@ -67,11 +93,15 @@ paths:
       requestBody:
         $ref: '#/components/requestBodies/Token'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '200': {description: Email verificado}
         '400': {description: Token expirado ou ja utilizado}
   /auth/logout:
     post:
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '204': {description: Sessao invalidada}
   /auth/password-reset:
     post:
@@ -86,6 +116,8 @@ paths:
               properties:
                 email: {type: string, format: email}
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '202': {description: Resposta generica sem revelar existencia da conta}
   /auth/password-reset/confirm:
     post:
@@ -101,6 +133,8 @@ paths:
                 token: {type: string, maxLength: 128}
                 password: {type: string, minLength: 12, maxLength: 64}
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '200': {description: Senha alterada e sessoes anteriores revogadas}
         '400': {description: Token expirado ou utilizado}
   /admin/subscription:
@@ -154,7 +188,144 @@ paths:
               schema: {$ref: '#/components/schemas/Profile'}
         '403': {description: Assinatura bloqueada ou CSRF invalido}
         '422': {description: Entrada invalida}
+  /platform/session:
+    get:
+      summary: Estado do MFA da conta com PlatformRole SUPER_ADMIN
+      responses:
+        '200':
+          description: Estado sem segredos; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled: {type: boolean}
+                  verified: {type: boolean}
+        '401': {description: Login necessario}
+        '403': {description: Conta sem papel de plataforma}
+  /platform/mfa/enrollment:
+    post:
+      summary: Iniciar configuracao TOTP com senha atual e papel de plataforma
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: {type: string, maxLength: 64}
+      responses:
+        '200':
+          description: Chave Base32 de configuracao manual, validade 10 minutos; nao registrar nem armazenar no frontend
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret: {type: string}
+                  issuer: {type: string}
+                  account: {type: string}
+                  algorithm: {type: string, const: SHA1}
+                  digits: {type: string, const: '6'}
+                  period: {type: string, const: '30'}
+        '401': {description: Senha invalida ou sessao ausente}
+        '403': {description: Papel ausente ou CSRF invalido}
+        '409': {description: Autenticador ja ativado}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {description: Chave de criptografia nao configurada}
+  /platform/mfa/verify:
+    post:
+      summary: Ativar autenticador ou elevar sessao por 15 minutos, rotacionando seu identificador
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '200': {description: MFA confirmado, codigo consumido uma unica vez}
+        '400': {description: Codigo invalido, expirado ou reutilizado}
+        '401': {description: Login necessario}
+        '403': {description: Papel ausente ou CSRF invalido}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /platform/tenants:
+    get:
+      summary: Listar ate 50 profissionais; exige papel e MFA vigente
+      parameters:
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200': {description: Lista com id, slug, display_name, subscription_status, plan_code, trial_ends_at e paid_until; sem dados de clientes}
+        '403': {description: Papel ausente ou MFA vencido}
+  /platform/tenants/{tenantId}:
+    get:
+      summary: Consultar estado atualizado da assinatura e ultimas 50 decisoes
+      parameters:
+        - {$ref: '#/components/parameters/PlatformTenant'}
+      responses:
+        '200': {description: tenant, subscription e decisions; acesso auditado e protegido por MFA}
+        '403': {description: Papel ausente ou MFA vencido}
+        '404': {description: Profissional inexistente}
+  /platform/tenants/{tenantId}/decisions:
+    post:
+      summary: Decisao administrativa atomica com role e MFA; nao e confirmacao automatica de banco/PIX
+      parameters:
+        - {$ref: '#/components/parameters/PlatformTenant'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, action, reason]
+              properties:
+                id: {type: string, format: uuid, description: Reutilizar para repetir a mesma decisao apos falha de rede}
+                action: {type: string, enum: [CONFIRM_PAYMENT, SUSPEND, REACTIVATE]}
+                reason: {type: string, minLength: 10, maxLength: 500}
+                reference: {type: string, minLength: 3, maxLength: 100, description: Obrigatoria e globalmente unica para pagamento; omitir nas outras acoes}
+                amountCents: {type: integer, minimum: 1, maximum: 100000000, description: Obrigatorio para pagamento; omitir nas outras acoes}
+                planCode: {type: string, enum: [BASIC, INTERMEDIATE, PREMIUM_TOP], description: Obrigatorio para pagamento; omitir nas outras acoes}
+      responses:
+        '200': {description: Estado resultante; pagamento soma 30 dias; retirar suspensao respeita vigencia original}
+        '400': {description: Combinacao de campos invalida}
+        '403': {description: Papel/MFA ausente ou CSRF invalido}
+        '404': {description: Profissional inexistente}
+        '409': {description: Referencia duplicada, identificador reutilizado com outros dados ou transicao invalida; nenhuma mudanca parcial}
+        '422': {description: Campos invalidos}
+  /platform/audit:
+    get:
+      summary: Consultar ate 50 eventos de plataforma com MFA, sem tokens ou contatos
+      parameters:
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200': {description: id, actor_id, action, tenant_id, correlation_id e created_at}
+        '403': {description: Papel ausente ou MFA vencido}
 components:
+  parameters:
+    Offset:
+      name: offset
+      in: query
+      schema: {type: integer, default: 0, minimum: 0, maximum: 100000}
+    PlatformTenant:
+      name: tenantId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    RateLimited:
+      description: Limite de tentativas excedido. Aguardar Retry-After antes de repetir.
+      headers:
+        Retry-After:
+          schema: {type: integer, minimum: 1}
+          description: Segundos restantes ate a proxima janela
+        X-Correlation-ID:
+          schema: {type: string, format: uuid}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: SESSION}
   requestBodies:

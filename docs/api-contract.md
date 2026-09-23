@@ -101,3 +101,11 @@ Quando `Subscription.status = TRIAL_EXPIRED_BLOCKED`, a API deve:
 O contrato executável em `contracts/openapi.yaml` documenta somente a implementação atual: autenticação, recuperação, consulta da assinatura e perfil inicial. Os demais quadros deste documento representam o contrato planejado.
 
 `GET /auth/csrf` retorna token e nome do header. Toda mutação exige esse header e o cookie da sessão, inclusive cadastro/login. O frontend renova o token após login. O alias `GET /subscriptions/{tenantId}` exige sessão e membership correspondente; a tela usa `GET /admin/subscription`, sem selecionar tenant no navegador. As antigas rotas públicas de criação de trial e confirmação de pagamento foram desativadas.
+
+## Plataforma - entrega seguinte de 23/09/2026
+
+OpenAPI 0.4.0 documenta `/platform/session`, `/platform/mfa/enrollment`, `/platform/mfa/verify`, `/platform/tenants`, `/platform/tenants/{tenantId}`, `/platform/tenants/{tenantId}/decisions` e `/platform/audit`. Todas exigem sessao e papel SUPER_ADMIN persistido; dados e decisoes exigem MFA vigente. Mutacoes exigem CSRF. Decisao usa UUID idempotente no corpo, motivo e dados de pagamento quando aplicavel; referencia bancaria unica. Operacao publica de autoativacao continua negada. Ver ADR-0005 e runbook superadmin.
+
+## Identidade e erros - 23/09/2026
+
+POST /auth/verification-email solicita novo link, com CSRF, email valido e resposta 202 generica. Reenvio nao reinicia trial. Rotas auth podem retornar 429 com Retry-After em segundos; cadastro, reenvio e recuperacao compartilham limite por email. X-Correlation-ID gerado pelo servidor e correlation_id no JSON permitem correlacionar erros tratados. Consulte OpenAPI para o contrato atualizado.

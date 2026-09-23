@@ -20,10 +20,10 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** garantir seguranca e multi-tenancy antes de qualquer regra de agenda.
 
-- [ ] **MVP-010:** criar Tenant, User, Membership, PlatformRole, AuthToken e sessao JDBC.
-- [ ] **MVP-011:** implementar cadastro admin, verificacao de email, login, logout, recuperacao e revogacao de sessoes.
-- [ ] **MVP-012:** aplicar cookies `HttpOnly`, `Secure`, `SameSite` e CSRF para mutacoes autenticadas por cookie.
-- [ ] **MVP-013:** implementar contexto de tenant por transacao e filtro de membership.
+- [x] **MVP-010:** criar Tenant, User, Membership, PlatformRole, AuthToken e sessao JDBC. MFA TOTP implementado; homologacao operacional pendente.
+- [x] **MVP-011:** implementar cadastro admin, verificacao de email, login, logout, recuperacao e revogacao de sessoes.
+- [x] **MVP-012:** aplicar cookies `HttpOnly`, `Secure`, `SameSite` e CSRF para mutacoes autenticadas por cookie.
+- [x] **MVP-013:** implementar contexto de tenant por transacao e filtro de membership.
 - [ ] **MVP-014:** criar RLS por tabela de negocio, com roles separadas de migracao, aplicacao e operacao.
 - [ ] **MVP-015:** implementar outbox e envio base de email com Mailpit/SES.
 - [ ] **MVP-016:** criar shell responsivo do painel com layout autenticado, tratamento central de erros e correlation ID.
@@ -35,16 +35,16 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** tornar o teste gratis uma regra central, nao um ajuste tardio.
 
-- [ ] **MVP-020:** criar Plan, Subscription, SubscriptionEvent, BillingDecision e AuditLog de assinatura.
+- [x] **MVP-020:** criar Plan, Subscription, SubscriptionEvent, BillingDecision e AuditLog de assinatura.
 - [ ] **MVP-021:** cadastrar planos Basico, Intermediario e Premium/Top, com trial permitido somente no Premium/Top.
 - [ ] **MVP-022:** iniciar `TRIAL_ACTIVE` por 7 dias na criacao do tenant profissional.
 - [ ] **MVP-023:** exibir banners de trial ativo, ultimos 2 dias e trial vencido.
 - [ ] **MVP-024:** implementar worker de expiracao de trial para mudar tenant para `TRIAL_EXPIRED_BLOCKED`.
 - [ ] **MVP-025:** bloquear novas reservas, publicacao e operacao administrativa ativa em trial vencido.
 - [ ] **MVP-026:** manter acesso limitado para visualizar aviso, escolher plano e informar/registrar pagamento.
-- [ ] **MVP-027:** implementar reativacao administrativa ou confirmacao de pagamento para `PAID_ACTIVE`, preservando configuracao.
+- [x] **MVP-027:** implementar reativacao administrativa ou confirmacao de pagamento para `PAID_ACTIVE`, preservando configuracao.
 - [ ] **MVP-028:** impedir novo trial automatico para mesmo tenant/email/documento/telefone sem override auditado.
-- [ ] **MVP-029:** criar painel super admin minimo de assinatura, vigencia, status, bloqueio, desbloqueio e auditoria.
+- [x] **MVP-029:** criar painel super admin minimo de assinatura, vigencia, status, bloqueio, desbloqueio e auditoria em `/plataforma`, com MFA obrigatorio.
 
 **Saida:** usuario testa Premium/Top por 7 dias; vencido sem pagamento fica bloqueado; pagamento reativa com dados intactos.
 
@@ -58,6 +58,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [ ] **MVP-033:** formulario PIX com chave, recebedor e auditoria; snapshots por reserva futura.
 - [ ] **MVP-034:** pagina publica `/a/{slug}` com perfil, servicos, estado de indisponibilidade e CTA de reserva.
 - [ ] **MVP-035:** bloquear publicacao ate existir servico ativo, PIX, politica e disponibilidade.
+- [ ] **MVP-036:** aba Compartilhar com copiar link publico e mensagem editavel para abrir no WhatsApp; agenda precisa estar publicada, sem envio automatico ou integracao simulada.
 
 **Saida:** catalogo e pagina publica prontos para publicar apos disponibilidade.
 
@@ -101,6 +102,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [ ] **MVP-066:** tratar pagamento insuficiente, duplicado, excedente, tardio e devolucao manual.
 - [ ] **MVP-067:** implementar cancelar, reagendar mesmo servico, concluir, marcar falta e reserva assistida.
 - [ ] **MVP-068:** enviar emails de solicitacao, confirmacao, alteracao, expiracao e cancelamento.
+- [ ] **MVP-069:** aba Financeiro do profissional com recebimentos, entradas/saldos pendentes, devolucoes e filtros por periodo, derivados dos pagamentos reais; independente da assinatura do SaaS.
 
 **Saida:** jornada ponta a ponta real com PIX manual e operacao diaria.
 
@@ -108,7 +110,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** garantir que o produto pode ser operado e recuperado.
 
-- [ ] **MVP-070:** lista de clientes com contato e historico por tenant.
+- [ ] **MVP-070:** aba Clientes com cadastro manual, edicao, busca, contato e historico por tenant; coordenar duplicidades com reservas. Antecipar junto da reserva assistida (MVP-067), antes da homologacao.
 - [ ] **MVP-071:** procedimentos de exportacao, correcao e exclusao verificadas.
 - [ ] **MVP-072:** revisar CSP, CSRF, uploads, rate limits, logs, arquivos privados e tokens.
 - [ ] **MVP-073:** testar restore de banco e arquivos, registrando RPO/RTO medidos.
@@ -132,5 +134,4 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 ## Evidencias de execucao
 
-O checklist acima representa o escopo completo. Consulte [implementation-status.md](implementation-status.md) para entregas efetivamente implementadas, parciais e validadas em 22/09/2026; itens amplos nao devem ser marcados completos apenas pela existencia de scaffold.
-
+O checklist acima representa o escopo completo. Consulte [implementation-status.md](implementation-status.md) para entregas efetivamente implementadas, parciais e validadas em 23/09/2026; itens amplos nao devem ser marcados completos apenas pela existencia de scaffold.

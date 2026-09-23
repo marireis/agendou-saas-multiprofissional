@@ -31,6 +31,10 @@ public final class TrialPolicy {
     }
 
     public Subscription refreshStatus(Subscription subscription) {
+        if (subscription.status() == SubscriptionStatus.PAID_ACTIVE &&
+                (subscription.paidUntil() == null || !clock.instant().isBefore(subscription.paidUntil()))) {
+            return subscription.withStatus(SubscriptionStatus.PAST_DUE);
+        }
         if (subscription.status() != SubscriptionStatus.TRIAL_ACTIVE && subscription.status() != SubscriptionStatus.TRIAL_EXPIRING) {
             return subscription;
         }

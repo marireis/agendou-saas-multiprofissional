@@ -1,4 +1,5 @@
 .idea/
+.local/
 .vscode/*.local.json
 node_modules/
 .next/
