@@ -53,4 +53,10 @@ Os testes de integracao usam bancos descartaveis e emails sinteticos. A jornada 
 
 ## Atualizacao de 23/09/2026
 
+Atualização 25/09: V008 adiciona configuração PIX/política em `/painel/pagamentos`. Use uma chave já registrada no banco; confira tipo, recebedor e regras antes de salvar. Dados são privados nesta etapa. Desativar preserva histórico; erro 409 exige recarregar e revisar. Nunca inclua chave em logs, prints de suporte ou motivo livre. Não há consulta bancária, QR Code ou pagamento automático. Versões antigas são preservadas para futura referência de reservas; retenção/backup devem incluir esses dados privados.
+
+Catálogo: V007 adiciona serviços. `/painel` agora é a visão geral; perfil/logo ficam em `/painel/minha-pagina`, catálogo em `/painel/servicos` e vigência em `/painel/assinatura`. Acesse Serviços → Novo serviço; para inativar, abra Editar e desmarque Serviço ativo. Se receber conflito de edição, recarregue a lista e abra o registro novamente. Reiniciar a API aplica a migration sem apagar os dados anteriores.
+
+Perfil e marca: V006 adiciona contato comercial, modalidade/local, progresso e logomarca. Em `/painel`, salve o rascunho do perfil ou envie uma imagem PNG/JPEG até 2 MiB. A logo é opcional; a prévia é privada. Arquivos SVG/GIF não são aceitos. Se o upload falhar, a imagem anterior é preservada. Trial vencido permite consultar, mas impede editar/remover. O banco guarda apenas o PNG saneado, incluído no backup do perfil (ADR-0006). Reinicie a API após atualizar o código; não basta recarregar o navegador.
+
 Reinicie a API pelo script acima para aplicar V004/V005 via Flyway e carregar reenvio, limites e plataforma/MFA. Emails antigos ainda pendentes sao expirados na V004; solicitar outro em /verificar. Contas e configuracoes sao preservadas. Veja [email indisponivel](email-indisponivel.md) para diagnostico. O procedimento local de 23/09 aplicou V004/V005 no banco existente sem apagar volumes.

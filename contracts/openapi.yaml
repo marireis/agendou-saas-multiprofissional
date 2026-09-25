@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.4.0
+  version: 0.7.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
@@ -180,6 +180,10 @@ paths:
                 name: {type: string, minLength: 1, maxLength: 100}
                 description: {type: string, maxLength: 2000}
                 timezone: {type: string, example: America/Sao_Paulo}
+                contactEmail: {type: string, maxLength: 254, description: Email comercial valido ou vazio; omitir preserva valor anterior}
+                contactPhone: {type: string, maxLength: 24, description: Telefone comercial com digitos e separadores usuais ou vazio}
+                serviceMode: {type: string, enum: [UNSET, IN_PERSON, ONLINE, HYBRID]}
+                location: {type: string, maxLength: 500, description: Local de atendimento; necessario para completar perfil presencial/hibrido}
       responses:
         '200':
           description: Perfil atualizado
@@ -188,6 +192,165 @@ paths:
               schema: {$ref: '#/components/schemas/Profile'}
         '403': {description: Assinatura bloqueada ou CSRF invalido}
         '422': {description: Entrada invalida}
+  /admin/profile/logo:
+    get:
+      summary: Consultar somente a logomarca do profissional autenticado, inclusive bloqueado
+      responses:
+        '200':
+          description: Variante PNG saneada; no-store e nosniff
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '401': {description: Sessao necessaria}
+        '404': {description: Sem logomarca}
+    put:
+      summary: Enviar ou substituir logo PNG/JPEG, com CSRF e assinatura operacional
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary, description: Bytes brutos ate 2097152; formato verificado pelo conteudo, maximo 4096 por lado e 16 milhoes de pixels}
+      responses:
+        '200':
+          description: Perfil atualizado; original descartado e variante PNG ate 512 pixels persistida
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Profile'}
+        '403': {description: Assinatura bloqueada ou CSRF invalido}
+        '413': {description: Arquivo maior que 2 MiB}
+        '422': {description: Formato, conteudo ou dimensoes invalidos; logo anterior preservada}
+    delete:
+      summary: Remover logo do proprio perfil, com CSRF e assinatura operacional
+      responses:
+        '200':
+          description: Perfil atualizado, sem logo; remocao idempotente
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Profile'}
+        '403': {description: Assinatura bloqueada ou CSRF invalido}
+  /admin/services:
+    get:
+      summary: Catalogo do proprio tenant, inclusive com assinatura bloqueada
+      parameters:
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Ate 50 registros ordenados por criacao/id; total e activeCount do tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Service'}}
+                  total: {type: integer}
+                  activeCount: {type: integer}
+        '401': {description: Sessao necessaria}
+    post:
+      summary: Cadastrar servico com assinatura operacional e CSRF
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ServiceEdit'}
+      responses:
+        '201':
+          description: Servico cadastrado; sem publicacao automatica
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Service'}
+        '403': {description: Assinatura bloqueada ou CSRF invalido}
+        '422': {description: Campos fora dos limites}
+        '400': {description: JSON invalido ou numeros fracionarios em campos inteiros}
+  /admin/services/{id}:
+    put:
+      summary: Editar ou inativar/reativar servico, preservando registro; version obrigatoria
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/ServiceEdit'}
+                - required: [version]
+      responses:
+        '200':
+          description: Servico atualizado com incremento de versao
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Service'}
+        '403': {description: Assinatura bloqueada ou CSRF invalido}
+        '404': {description: Servico inexistente ou de outro tenant}
+        '409': {description: Versao desatualizada; recarregar e revisar antes de repetir}
+        '422': {description: Campos invalidos ou versao ausente}
+  /admin/payment-settings:
+    get:
+      summary: Configuracao PIX atual do proprio tenant; leitura preservada apos bloqueio
+      responses:
+        '200':
+          description: no-store; configured=false e version=0 se ainda nao configurado
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [configured, version]
+                    properties:
+                      configured: {const: false}
+                      version: {const: 0}
+                  - {$ref: '#/components/schemas/PaymentSettings'}
+        '401': {description: Sessao necessaria}
+    put:
+      summary: Gravar nova versao imutavel com CSRF e assinatura operacional
+      description: Valida somente formato/DV. Nao consulta DICT, confirma titularidade, publica agenda ou confirma pagamento. Versao inicial zero; dados identicos nao criam nova revisao.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/PaymentSettingsFields'}
+                - type: object
+                  required: [version, confirmed, changeReason]
+                  properties:
+                    version: {type: integer, minimum: 0}
+                    confirmed: {type: boolean, const: true, description: Declaracao de conferencia dos dados pelo profissional}
+                    changeReason: {type: string, minLength: 10, maxLength: 500}
+      responses:
+        '200':
+          description: Configuracao atual gravada; no-store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentSettings'}
+        '403': {description: Assinatura bloqueada ou CSRF invalido}
+        '409': {description: Versao desatualizada; recarregar e revisar}
+        '422': {description: Chave/campos invalidos ou conferencia nao confirmada}
+  /admin/payment-settings/history:
+    get:
+      summary: Ate 50 metadados de revisao, sem chaves ou textos privados
+      parameters:
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Ordem de versao decrescente; no-store
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    version: {type: integer}
+                    actorId: {type: string, format: uuid}
+                    changedFields: {type: array, items: {type: string}}
+                    enabled: {type: boolean}
+                    createdAt: {type: string, format: date-time}
+                    correlationId: {type: string}
+        '401': {description: Sessao necessaria}
   /platform/session:
     get:
       summary: Estado do MFA da conta com PlatformRole SUPER_ADMIN
@@ -339,6 +502,44 @@ components:
             properties:
               token: {type: string, maxLength: 128}
   schemas:
+    PaymentSettingsFields:
+      type: object
+      required: [keyType, pixKey, recipientName, paymentInstructions, cancellationPolicy, enabled]
+      properties:
+        keyType: {type: string, enum: [CPF, CNPJ, EMAIL, PHONE, RANDOM]}
+        pixKey: {type: string, minLength: 1, maxLength: 100, description: Normalizada no servidor; valor persistido ate 77 caracteres}
+        recipientName: {type: string, minLength: 2, maxLength: 100}
+        paymentInstructions: {type: string, minLength: 10, maxLength: 2000}
+        cancellationPolicy: {type: string, minLength: 10, maxLength: 4000}
+        enabled: {type: boolean}
+    PaymentSettings:
+      allOf:
+        - {$ref: '#/components/schemas/PaymentSettingsFields'}
+        - type: object
+          properties:
+            configured: {const: true}
+            version: {type: integer, minimum: 1}
+            updatedAt: {type: string, format: date-time}
+    ServiceEdit:
+      type: object
+      required: [name, description, durationMinutes, priceCents, bufferBeforeMinutes, bufferAfterMinutes, depositPercent, active]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, maxLength: 2000}
+        durationMinutes: {type: integer, minimum: 5, maximum: 480}
+        priceCents: {type: integer, minimum: 1, maximum: 100000000}
+        bufferBeforeMinutes: {type: integer, minimum: 0, maximum: 240}
+        bufferAfterMinutes: {type: integer, minimum: 0, maximum: 240}
+        depositPercent: {type: integer, minimum: 50, maximum: 100}
+        active: {type: boolean}
+        version: {type: integer, minimum: 0}
+    Service:
+      allOf:
+        - {$ref: '#/components/schemas/ServiceEdit'}
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            depositCents: {type: integer, description: Entrada em centavos arredondada para cima pelo servidor}
     Subscription:
       type: object
       properties:
@@ -355,6 +556,14 @@ components:
         slug: {type: string}
         description: {type: string}
         timezone: {type: string}
+        contactEmail: {type: string}
+        contactPhone: {type: string}
+        serviceMode: {type: string, enum: [UNSET, IN_PERSON, ONLINE, HYBRID]}
+        location: {type: string}
+        logoVersion: {type: [string, 'null'], format: uuid}
+        profileProgress: {type: integer, enum: [25, 50, 75, 100]}
+        profileComplete: {type: boolean, description: Perfil preenchido; nao significa agenda publicada}
+        missingFields: {type: array, items: {type: string}}
     Error:
       type: object
       properties:

@@ -24,10 +24,10 @@ export async function api(path: string, method = "GET", body?: unknown) {
     await requireSuccess(response);
     const csrf = await response.json();
     headers[csrf.headerName] = csrf.token;
-    headers["Content-Type"] = "application/json";
+    headers["Content-Type"] = body instanceof Blob ? "application/octet-stream" : "application/json";
   }
   const response = await fetch(`/api/v1${path}`, {
-    method, headers, cache: "no-store", body: body === undefined ? undefined : JSON.stringify(body),
+    method, headers, cache: "no-store", body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
   });
   if (response.status === 401 && !path.startsWith("/auth/")) window.location.assign(path.startsWith("/platform/") ? "/entrar?destino=plataforma" : "/entrar");
   await requireSuccess(response);

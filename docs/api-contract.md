@@ -4,6 +4,8 @@ Todas as rotas abaixo ficam sob `/api/v1`. Erros retornam `code`, `message`, `co
 
 ## 1. Convencoes
 
+Entrega PIX/política (25/09, OpenAPI 0.7.0): `GET/PUT /admin/payment-settings` lê/grava configuração do próprio tenant; `GET /admin/payment-settings/history?offset=0` lista apenas metadados. PUT exige version (zero inicialmente), keyType, pixKey, recipientName, paymentInstructions, cancellationPolicy, enabled, confirmed=true e changeReason. Revisões imutáveis; conflito 409 para versão antiga. Validação local 422 não atesta registro/titularidade bancária. Leitura autenticada com no-store preservada após bloqueio; mutações exigem assinatura operacional/CSRF. Referência e snapshots de reservas serão adicionados no MVP-052.
+
 - `400`: requisicao malformada.
 - `401`: autenticacao ausente ou invalida.
 - `403`: autenticado sem permissao.
@@ -107,5 +109,17 @@ O contrato executável em `contracts/openapi.yaml` documenta somente a implement
 OpenAPI 0.4.0 documenta `/platform/session`, `/platform/mfa/enrollment`, `/platform/mfa/verify`, `/platform/tenants`, `/platform/tenants/{tenantId}`, `/platform/tenants/{tenantId}/decisions` e `/platform/audit`. Todas exigem sessao e papel SUPER_ADMIN persistido; dados e decisoes exigem MFA vigente. Mutacoes exigem CSRF. Decisao usa UUID idempotente no corpo, motivo e dados de pagamento quando aplicavel; referencia bancaria unica. Operacao publica de autoativacao continua negada. Ver ADR-0005 e runbook superadmin.
 
 ## Identidade e erros - 23/09/2026
+
+## Catálogo de serviços - OpenAPI 0.6.0
+
+`GET /admin/services?offset=0` retorna items (até 50), total e activeCount do próprio tenant. `POST` cadastra; `PUT /admin/services/{id}` edita/inativa/reativa exigindo version. Campos: name, description, durationMinutes (5–480), priceCents (1–100000000), bufferBeforeMinutes e bufferAfterMinutes (0–240), depositPercent (50–100), active. Resposta inclui id, version e depositCents calculado pelo servidor com arredondamento para cima. Inteiros fracionários são rejeitados (400), limites inválidos retornam 422, versão antiga 409 e ID de outro tenant 404. CSRF e assinatura operacional obrigatórios em mutações; não há DELETE. POST não é idempotente; após falha de rede, consultar a lista antes de repetir.
+
+## Perfil e marca - OpenAPI 0.5.0
+
+`GET/PATCH /admin/profile` inclui contactEmail, contactPhone, serviceMode (UNSET/IN_PERSON/ONLINE/HYBRID) e location. Omissão/null dos campos novos preserva valores anteriores; vazio limpa rascunhos. Resposta inclui logoVersion, profileProgress, profileComplete e missingFields. Perfil completo não autoriza publicação. Fuso exige identificador IANA.
+
+`PUT /admin/profile/logo` recebe bytes brutos PNG/JPEG até 2097152 bytes (sem multipart), com CSRF. Retorna perfil atualizado após saneamento. 413 para excesso de bytes; 422 para imagem inválida/dimensões excessivas; 403 para assinatura bloqueada. `DELETE` remove e retorna perfil. `GET` entrega somente a logo do tenant da sessão, inclusive bloqueado, com Content-Type image/png, no-store/nosniff; 404 se ausente. Não existe rota pública nesta etapa.
+
+### Reenvio e erros de identidade
 
 POST /auth/verification-email solicita novo link, com CSRF, email valido e resposta 202 generica. Reenvio nao reinicia trial. Rotas auth podem retornar 429 com Retry-After em segundos; cadastro, reenvio e recuperacao compartilham limite por email. X-Correlation-ID gerado pelo servidor e correlation_id no JSON permitem correlacionar erros tratados. Consulte OpenAPI para o contrato atualizado.

@@ -130,6 +130,12 @@ O quadro inicial acima é o plano de domínio. O histórico real até esta etapa
 
 As próximas migrations devem continuar a numeração existente, sem reutilizar versões do quadro planejado.
 
+- V008: payment_settings_versions com chave/recebedor/politicas, enabled, versao, ator, motivo, campos alterados e correlation ID. RLS e FK de membership; runtime somente SELECT/INSERT. Dados atuais pela maior versao; reservas futuras deverao referenciar/copiar a versao utilizada.
+
+- V007: services com tenant_id/RLS, duracao, preco em centavos, intervalos, entrada, ativo, versao e timestamps. Constraints numericas e UNIQUE(tenant_id,id) preparam referencias compostas futuras. Runtime sem DELETE; inativacao preserva dados.
+
+- V006: contato comercial, modalidade/local e variante PNG/UUID no perfil, mantendo RLS. Limite de 2 MiB no banco e par logo/versao consistente. Campos existentes e assinaturas preservados; novos campos iniciam vazios.
+
 - V005: platform_roles (runtime somente leitura), platform_mfa (segredo cifrado, versao e consumo TOTP), billing_decisions (RLS, referencia unica, estados antes/depois), platform_audit (metadados append-only para runtime) e funcao de listagem restrita. Sem BYPASSRLS para a aplicacao. Provisionamento nao altera usuarios, perfis ou trials.
 
 - V004: contadores globais de autenticacao e ciclo de vida da outbox, com status, finalidade, vinculo ao usuario/token, validade e diagnostico sem dados sensiveis. Tabelas globais de infraestrutura nao aceitam tenant fornecido pelo cliente e nao possuem CRUD publico.
