@@ -2,7 +2,16 @@
 
 **Atualizado em:** 25/09/2026. Desenvolvimento na própria pasta do projeto.
 
-## Entrega mais recente em 25/09: PIX e política (MVP-033)
+## Entrega mais recente em 25/09: página e preparação da publicação (MVP-034/035 parcial)
+
+- Página `/a/{slug}` preparada com perfil, logo saneada, contato comercial, modalidade/local, serviços ativos, duração, preço e entrada. Reserva explicitamente indisponível, sem horários ou confirmação simulados.
+- Nova aba **Publicação** em `/painel/publicacao`, com prévia privada, endereço reservado e requisitos calculados: perfil, assinatura, serviço ativo, PIX/política e disponibilidade.
+- V009 inicia todos os perfis como não publicados. Rascunho e slug inexistente retornam o mesmo 404, inclusive para logo. Projeção pública sem PIX, identidade do usuário ou tenant ID; consultas sem cache.
+- Leitores SQL restritos expõem somente os campos públicos de páginas publicadas, preservando RLS nas consultas diretas. Testes ativam publicação somente em bancos descartáveis para verificar a projeção.
+- POST de publicação permanece bloqueado enquanto não existe calendário/disponibilidade real. Retirada autenticada com CSRF preserva dados e funciona mesmo após bloqueio da assinatura.
+- OpenAPI 0.8.0 e ADR-0009. **MVP-034/035 continuam parciais:** publicação funcional e CTA de reserva dependem das próximas etapas. Nenhuma página real foi publicada.
+
+## Entrega anterior em 25/09: PIX e política (MVP-033)
 
 - Revisados o status, as regras SDD e os módulos de perfil, catálogo, assinatura e navegação. Entregas anteriores preservadas e cobertas pela suíte de regressão.
 - Nova área funcional **PIX e política**, em `/painel/pagamentos`, com tipo/chave PIX, recebedor, instruções de pagamento, política de cancelamento/reagendamento e opção de desativar a configuração sem apagar histórico.
@@ -81,9 +90,10 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 
 | Check | Evidência |
 |---|---|
-| `mvnw.cmd verify` | PASS: 20 testes unitários + 39 de integração (59 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
-| Migrations V001 a V008 | Aplicadas em bancos descartáveis, usando role real de runtime |
-| Atualização de banco existente | V003 → V008 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| `mvnw.cmd verify` | PASS: 20 testes unitários + 42 de integração (62 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
+| Migrations V001 a V009 | Aplicadas em bancos descartáveis, usando role real de runtime |
+| Atualização de banco existente | V003 → V009 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| Página/publicação | Rascunhos/logo privados, projeção só com serviços ativos, isolamento entre tenants, RLS direta, entrada em centavos, no-store, requisitos, CSRF, bloqueio de publicação e retirada sem perda de dados |
 | PIX/política | Tipos/DV, normalização, confirmação obrigatória, versões antigas preservadas, auditoria sem chave, RLS/CSRF, permissões imutáveis, bloqueio pós-trial, noop e concorrência com um vencedor |
 | Catálogo de serviços | Cadastro/edição/inativação/reativação, entrada arredondada, limites na API/banco, JSON fracionário rejeitado, RLS, CSRF, bloqueio após trial e duas edições concorrentes com um único vencedor |
 | Perfil e logo | Rascunho/progresso, modalidade online/presencial, validação, compatibilidade, CSRF, isolamento entre profissionais, edição bloqueada, leitura preservada e imagem anterior mantida após erro |
@@ -98,7 +108,7 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 | Regressão de negócio | Cadastro, sessão, RLS, bloqueio do trial, reativação, recuperação e logout continuam cobertos |
 | `npm run typecheck` e `npm run build` | PASS |
 
-Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da suíte atual: `apps/api/payment-verify.log`. A primeira tentativa de integração encontrou Docker fechado; após iniciar o Docker, a suíte completa passou sem ignorar testes. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador de PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
+Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da suíte atual: `apps/api/public-page-verify.log`; build em `apps/web/public-page-build.log`. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador de publicação/PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
 
 ## Backlog: concluído e parcial
 
@@ -115,12 +125,13 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - **MVP-030/031:** perfil, contato, modalidade/local, progresso e upload/remoção de logo implementados. Exposição pública da variante saneada aguarda publicação da página.
 - **MVP-032:** catálogo administrativo funcional e testado; publicação, snapshots e reserva dependem das próximas etapas.
 - **MVP-033:** configuração PIX/política, validação local, auditoria e versões imutáveis concluídas. Referência/cópia por reserva entra no MVP-052, sem reescrever condições anteriores.
+- **MVP-034/035 (parciais):** página, prévia privada e bloqueio/requisitos de publicação implementados; liberação pública e CTA dependem de disponibilidade/reserva reais.
 
 ## Próximas implementações
 
-1. **Próxima entrega — página pública (MVP-034/035):** perfil, logo e serviços em `/a/{slug}`, critérios reais de publicação e estado de indisponibilidade. Não expor chave PIX na página geral; pagamento terá fluxo privado próprio. Sem disponibilidade real, a agenda continua indisponível para reserva.
-2. **Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático. Coordenar liberação com a etapa de disponibilidade.
-3. **Calendário e horários:** dias, períodos, pausas, exceções, bloqueios, agenda semanal/diária e alocação GiST com concorrência (MVP-040 a 045).
+1. **Próxima entrega — calendário e horários (MVP-040 a 045):** começar por regras semanais no fuso do perfil, dias/períodos, pausas, exceções e bloqueios; depois slots reais, agenda diária/semanal e alocação GiST com concorrência.
+2. **Concluir publicação (MVP-034/035):** substituir o bloqueio de disponibilidade pelo cálculo real, validar todos os requisitos no servidor e liberar publicação explícita. CTA só inicia reservas quando o fluxo estiver funcional; PIX nunca aparece na página geral.
+3. **Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático.
 4. **Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056).
 5. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
 6. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
@@ -130,7 +141,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 | Função | Situação / etapa |
 |---|---|
 | Acesso superadmin | Implementado e acesso com autenticador confirmado pela responsável |
-| Página com logomarca do profissional | Perfil, logo e prévia privada concluídos; página pública em MVP-034/035 |
+| Página com logomarca do profissional | Página e prévia em Publicação implementadas; liberação pública depende de disponibilidade real |
 | Calendário e disponibilidade | MVP-040 a 045, depois do catálogo |
 | Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
 | Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
@@ -141,8 +152,8 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Banco local atualizado até V008 e API reiniciada na porta 8080 em 25/09; frontend na porta 3000, com resposta HTTP 200 em `/painel/pagamentos`. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
-- Agenda da home é ilustrativa. Publicação, reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
+- Banco local atualizado até V009 e API reiniciada na porta 8080 em 25/09; frontend na porta 3000, com resposta HTTP 200 em `/painel/publicacao`, health da API UP e 404 para slug público inexistente. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Agenda da home é ilustrativa. Página e prévia estão implementadas, mas publicação funcional, reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas terão idempotência própria em MVP-053.
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.
 - Recuperação de MFA é operacional/auditada; não há backup codes ou reset público. A chave DPAPI depende deste usuário Windows; produção exige gestão de segredos própria.

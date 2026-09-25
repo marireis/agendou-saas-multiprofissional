@@ -1571,3 +1571,22 @@ h3 {
 .mfa-secret { overflow-wrap:anywhere; color:var(--color-primary-dark); user-select:all; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 @media(max-width:640px) { .platform-panel { padding:18px; } .platform-table th, .platform-table td { padding:12px 8px; } }
+.public-professional{max-width:1100px;margin:0 auto;padding:40px 24px;color:var(--text,#edf6f3)}
+.public-professional header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:60px}
+.public-professional header>span{font-size:.7rem;letter-spacing:.14em;color:#9bb5ad}
+.public-profile-hero{padding:32px 0 44px;max-width:780px}
+.public-profile-hero h1{font-size:clamp(2rem,5vw,4rem);line-height:1.1;margin:20px 0}
+.public-business-logo{width:112px;height:112px;object-fit:contain;border-radius:20px;background:#fff;padding:10px;margin-bottom:20px}
+.public-description{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;color:#b6c9c2}
+.public-details{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.public-details span{border:1px solid #2b4740;border-radius:24px;padding:8px 14px;font-size:.85rem;overflow-wrap:anywhere}
+.public-booking-status{padding:28px;border:1px solid #2b4740;background:#112b24;border-radius:20px;margin-bottom:44px}
+.public-booking-status p{color:#b6c9c2;line-height:1.6}
+.public-service-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:20px;margin:24px 0 44px}
+.public-service-grid article{border:1px solid #2b4740;background:#10221e;border-radius:20px;padding:28px;overflow-wrap:anywhere}
+.public-service-grid article>span{color:#7de0bd;font-size:.85rem}
+.public-service-grid strong,.public-service-grid small{display:block;margin-top:12px}
+.public-service-grid strong{font-size:1.5rem}.public-service-grid small{color:#b6c9c2}
+.public-contact{padding:24px 0;border-top:1px solid #2b4740;overflow-wrap:anywhere}
+.public-contact a{color:#7de0bd}.public-professional footer{color:#9bb5ad;font-size:.85rem;padding:32px 0}
+@media(max-width:600px){.public-professional{padding:24px 16px}.public-professional header{align-items:flex-start;flex-direction:column;margin-bottom:20px}}

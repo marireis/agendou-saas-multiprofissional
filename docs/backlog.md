@@ -56,8 +56,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [x] **MVP-031:** upload de logo ate 2 MB com validacao por conteudo e variante PNG sanitizada; consulta autenticada nesta etapa, exposicao publica depende de MVP-034/035. Persistencia compacta no banco conforme ADR-0006.
 - [x] **MVP-032:** cadastro, edicao, inativacao/reativacao de servicos com duracao 5-480 min, preco positivo, buffers 0-240 min e entrada 50-100%; RLS, bloqueio por assinatura e versao contra sobrescrita concorrente.
 - [x] **MVP-033:** formulario PIX, recebedor, instrucoes/politica, validacao local e auditoria com versoes imutaveis (V008). Referencia/copia por reserva depende do MVP-052; nao existe confirmacao bancaria automatica.
-- [ ] **MVP-034:** pagina publica `/a/{slug}` com perfil, servicos, estado de indisponibilidade e CTA de reserva.
-- [ ] **MVP-035:** bloquear publicacao ate existir servico ativo, PIX, politica e disponibilidade.
+- [ ] **MVP-034 (parcial):** página `/a/{slug}`, perfil/logo, serviços ativos, preços/entrada, estado indisponível e prévia privada implementados. CTA permanece desabilitado até disponibilidade/reserva reais.
+- [ ] **MVP-035 (parcial):** requisitos calculados, rascunho privado, retirada e bloqueio de publicação implementados. Liberação efetiva depende de disponibilidade MVP-040 a 045; nenhuma conta publicada automaticamente.
 - [ ] **MVP-036:** aba Compartilhar com copiar link publico e mensagem editavel para abrir no WhatsApp; agenda precisa estar publicada, sem envio automatico ou integracao simulada.
 
 **Saida:** catalogo e pagina publica prontos para publicar apos disponibilidade.

@@ -4,6 +4,8 @@ Todas as rotas abaixo ficam sob `/api/v1`. Erros retornam `code`, `message`, `co
 
 ## 1. Convencoes
 
+Página/publicação (25/09, OpenAPI 0.8.0): `GET /admin/publication` retorna published, canPublish=false, missingRequirements e path. POST exige CSRF/assinatura e retorna 409 até haver disponibilidade real; DELETE retira somente a própria página, inclusive após bloqueio, sem apagar dados. `GET /public/pages/{slug}` e `/logo` são anônimos e sem cache: 404 idêntico para rascunho/inexistente; projeção somente de campos públicos e serviços ativos, sem PIX. Nenhuma publicação automática; prévia privada na aba Publicação.
+
 Entrega PIX/política (25/09, OpenAPI 0.7.0): `GET/PUT /admin/payment-settings` lê/grava configuração do próprio tenant; `GET /admin/payment-settings/history?offset=0` lista apenas metadados. PUT exige version (zero inicialmente), keyType, pixKey, recipientName, paymentInstructions, cancellationPolicy, enabled, confirmed=true e changeReason. Revisões imutáveis; conflito 409 para versão antiga. Validação local 422 não atesta registro/titularidade bancária. Leitura autenticada com no-store preservada após bloqueio; mutações exigem assinatura operacional/CSRF. Referência e snapshots de reservas serão adicionados no MVP-052.
 
 - `400`: requisicao malformada.

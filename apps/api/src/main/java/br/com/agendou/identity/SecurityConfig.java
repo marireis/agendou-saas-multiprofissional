@@ -22,6 +22,7 @@ public class SecurityConfig {
  @Bean SecurityFilterChain security(HttpSecurity http, HttpSessionSecurityContextRepository contexts,
    AuthRateLimiter limiter, com.fasterxml.jackson.databind.ObjectMapper json) throws Exception {
   return http.authorizeHttpRequests(auth -> auth
+    .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/pages/**").permitAll()
     .requestMatchers("/api/v1/auth/**", "/api/v1/health", "/error").permitAll()
     .requestMatchers("/api/v1/subscriptions/*/trial", "/api/v1/subscriptions/*/confirm-payment").denyAll()
     .anyRequest().authenticated())

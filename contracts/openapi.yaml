@@ -1,13 +1,92 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.7.0
+  version: 0.8.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /admin/publication:
+    get:
+      summary: Estado e requisitos reais de publicação do profissional autenticado
+      responses:
+        '200':
+          description: Sem cache; disponibilidade ainda pendente nesta versão
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [published, canPublish, missingRequirements, path]
+                properties:
+                  published: {type: boolean}
+                  canPublish: {type: boolean, const: false}
+                  missingRequirements: {type: array, items: {type: string}}
+                  path: {type: string}
+        '401': {description: Sessão necessária}
+    post:
+      summary: Solicitar publicação (bloqueada até MVP-040 a 045)
+      responses:
+        '409': {description: Disponibilidade não implementada; nenhuma publicação realizada}
+        '403': {description: Assinatura bloqueada ou CSRF inválido}
+        '401': {description: Sessão necessária}
+    delete:
+      summary: Retirar somente a própria página do ar, inclusive com assinatura bloqueada
+      responses:
+        '204': {description: Retirada idempotente sem excluir dados}
+        '403': {description: CSRF inválido ou membership ausente}
+        '401': {description: Sessão necessária}
+  /public/pages/{slug}:
+    parameters:
+      - {name: slug, in: path, required: true, schema: {type: string}}
+    get:
+      security: []
+      summary: Projeção pública sem PIX, identidade do usuário ou tenant ID
+      responses:
+        '404': {description: Slug inexistente ou página não publicada, sem distinção}
+        '200':
+          description: Sem cache; reservas indisponíveis nesta versão
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, slug, description, timezone, contactEmail, contactPhone, serviceMode, location, hasLogo, bookingAvailable, services]
+                properties:
+                  name: {type: string}
+                  slug: {type: string}
+                  description: {type: string}
+                  timezone: {type: string}
+                  contactEmail: {type: string}
+                  contactPhone: {type: string}
+                  serviceMode: {type: string}
+                  location: {type: string}
+                  hasLogo: {type: boolean}
+                  bookingAvailable: {type: boolean, const: false}
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, description, durationMinutes, priceCents, depositCents]
+                      properties:
+                        id: {type: string, format: uuid}
+                        name: {type: string}
+                        description: {type: string}
+                        durationMinutes: {type: integer}
+                        priceCents: {type: integer}
+                        depositCents: {type: integer}
+  /public/pages/{slug}/logo:
+    parameters:
+      - {name: slug, in: path, required: true, schema: {type: string}}
+    get:
+      security: []
+      responses:
+        '200':
+          description: Variante PNG saneada, sem cache, nosniff
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '404': {description: Página não publicada, inexistente ou sem logo}
   /health:
     get:
       security: []
