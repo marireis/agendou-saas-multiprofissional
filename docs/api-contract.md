@@ -4,6 +4,12 @@ Todas as rotas abaixo ficam sob `/api/v1`. Erros retornam `code`, `message`, `co
 
 ## 1. Convencoes
 
+Prévia (OpenAPI 0.10.0): `GET /admin/availability/slots?serviceId={uuid}&date={yyyy-MM-dd}` retorna candidates e sequence em UTC, timezone, intervalMinutes e bookingAvailable=false. A data usa o fuso do perfil, hoje a hoje+59; início pelo menos 24h adiante. Serviço ativo do próprio tenant; 404 genérico caso contrário. Sem cache, sem criação de reserva e sem consulta a alocações persistidas. Períodos que cruzam transição de offset são omitidos conforme ADR-0011.
+
+Complemento de horários: `schedule.intervalMinutes` no GET/PUT aceita inteiro 0–240; ausência/null tem padrão zero para compatibilidade. Representa tempo livre mínimo entre atendimentos, global inclusive em datas especiais. O gerador combina essa regra com duração e buffers dos serviços; não é intervalo da grade de slots.
+
+Horários (OpenAPI 0.9.0): `GET/PUT /admin/availability`. GET retorna version, timezone do perfil e schedule (weekly/exceptions). PUT substitui o documento completo com version; exige CSRF/assinatura operacional, 409 se desatualizado, 422 para sobreposições/dias repetidos/períodos inválidos. Datas especiais substituem o expediente semanal; períodos vazios fecham o dia. Prévia de candidatos disponível na rota privada /admin/availability/slots; sem slots públicos reserváveis.
+
 Página/publicação (25/09, OpenAPI 0.8.0): `GET /admin/publication` retorna published, canPublish=false, missingRequirements e path. POST exige CSRF/assinatura e retorna 409 até haver disponibilidade real; DELETE retira somente a própria página, inclusive após bloqueio, sem apagar dados. `GET /public/pages/{slug}` e `/logo` são anônimos e sem cache: 404 idêntico para rascunho/inexistente; projeção somente de campos públicos e serviços ativos, sem PIX. Nenhuma publicação automática; prévia privada na aba Publicação.
 
 Entrega PIX/política (25/09, OpenAPI 0.7.0): `GET/PUT /admin/payment-settings` lê/grava configuração do próprio tenant; `GET /admin/payment-settings/history?offset=0` lista apenas metadados. PUT exige version (zero inicialmente), keyType, pixKey, recipientName, paymentInstructions, cancellationPolicy, enabled, confirmed=true e changeReason. Revisões imutáveis; conflito 409 para versão antiga. Validação local 422 não atesta registro/titularidade bancária. Leitura autenticada com no-store preservada após bloqueio; mutações exigem assinatura operacional/CSRF. Referência e snapshots de reservas serão adicionados no MVP-052.

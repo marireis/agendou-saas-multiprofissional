@@ -1,13 +1,74 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.8.0
+  version: 0.10.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /admin/availability/slots:
+    get:
+      summary: Prévia privada de candidatos e sequência de atendimentos sem criar reservas
+      description: Usa configuração salva, serviço ativo do tenant e fuso do perfil; antecedência 24h, horizonte de hoje a hoje+59 dias, grade local 15min. Períodos que atravessam mudança de offset são omitidos. Candidatos são alternativas; sequência respeita intervalo e buffers. Sem consulta a alocações persistidas nesta etapa.
+      parameters:
+        - {name: serviceId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Sem cache; leitura preservada após bloqueio da assinatura
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: {type: string, format: date}
+                  today: {type: string, format: date}
+                  lastDate: {type: string, format: date}
+                  timezone: {type: string}
+                  intervalMinutes: {type: integer}
+                  bookingAvailable: {type: boolean, const: false}
+                  candidates: {type: array, items: {$ref: '#/components/schemas/SlotCandidate'}}
+                  sequence: {type: array, items: {$ref: '#/components/schemas/SlotCandidate'}}
+        '401': {description: Sessão necessária}
+        '404': {description: Serviço inexistente, inativo ou de outro tenant}
+        '422': {description: Data fora do horizonte}
+  /admin/availability:
+    get:
+      summary: Horários privados do profissional autenticado, com versão e fuso atual do perfil
+      responses:
+        '200':
+          description: Sem cache; configuração inicial vazia tem versão zero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: {type: integer, minimum: 0}
+                  timezone: {type: string}
+                  schedule: {$ref: '#/components/schemas/AvailabilitySchedule'}
+        '401': {description: Sessão necessária}
+    put:
+      summary: Substituir configuração completa com CSRF, assinatura operacional e versão
+      description: Dias ISO 1 a 7. Exceção substitui o expediente da data; períodos vazios fecham o dia. Pausas são intervalos entre períodos. Sem períodos noturnos cruzando meia-noite; prévia em /admin/availability/slots.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, schedule]
+              properties:
+                version: {type: integer, minimum: 0}
+                schedule: {$ref: '#/components/schemas/AvailabilitySchedule'}
+      responses:
+        '200': {description: Configuração salva e versão incrementada, mesmo formato do GET}
+        '400': {description: JSON ou data/hora malformados}
+        '401': {description: Sessão necessária}
+        '403': {description: CSRF ou assinatura bloqueada}
+        '409': {description: Versão desatualizada; recarregar}
+        '422': {description: Campos inválidos, sobreposição, dias/datas repetidos ou período invertido}
   /admin/publication:
     get:
       summary: Estado e requisitos reais de publicação do profissional autenticado
@@ -581,6 +642,48 @@ components:
             properties:
               token: {type: string, maxLength: 128}
   schemas:
+    SlotCandidate:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: string, format: date-time, description: Início em UTC}
+        end: {type: string, format: date-time, description: Fim em UTC}
+    AvailabilityPeriod:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: string, example: '09:00', description: 'Hora local com precisão de minutos; segundos/nanos não zero são rejeitados'}
+        end: {type: string, example: '12:00'}
+    AvailabilitySchedule:
+      type: object
+      required: [weekly, exceptions]
+      properties:
+        intervalMinutes: {type: integer, minimum: 0, maximum: 240, default: 0, description: 'Tempo livre mínimo entre atendimentos, em todos os dias. Ausente/null em documentos antigos vira zero. Aplicado à sequência da prévia; integração com ocupações reais depende de MVP-042/043/045.'}
+        weekly:
+          type: array
+          maxItems: 7
+          items:
+            type: object
+            required: [day, periods]
+            properties:
+              day: {type: integer, minimum: 1, maximum: 7}
+              periods:
+                type: array
+                maxItems: 8
+                items: {$ref: '#/components/schemas/AvailabilityPeriod'}
+        exceptions:
+          type: array
+          maxItems: 366
+          items:
+            type: object
+            required: [date, reason, periods]
+            properties:
+              date: {type: string, format: date}
+              reason: {type: string, maxLength: 100, description: Observação privada}
+              periods:
+                type: array
+                maxItems: 8
+                items: {$ref: '#/components/schemas/AvailabilityPeriod'}
     PaymentSettingsFields:
       type: object
       required: [keyType, pixKey, recipientName, paymentInstructions, cancellationPolicy, enabled]

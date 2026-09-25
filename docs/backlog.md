@@ -66,8 +66,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** gerar horarios confiaveis e impedir dupla reserva.
 
-- [ ] **MVP-040:** configurar dias, periodos, pausas, excecoes, feriados manuais e bloqueios.
-- [ ] **MVP-041:** implementar gerador de candidatos considerando duracao, buffers, antecedencia, horizonte e fuso IANA.
+- [x] **MVP-040:** aba Horários com dias/períodos semanais, pausas por intervalos separados e exceções por data; feriado/bloqueio total sem períodos, bloqueio parcial por expediente excepcional. RLS, assinatura, CSRF e versão concorrente. Geração/aplicação em slots depende de MVP-041 a 045.
+- [x] **MVP-041:** gerador e prévia privada por serviço/data; duração/buffers, grade 15min, antecedência 24h, horizonte 60 dias, fuso e exceções. Sequência ilustrativa respeita intervalo global. Períodos que cruzam transição de offset são omitidos (ADR-0011). Integração com ocupações persistidas depende de MVP-042/043/045.
 - [ ] **MVP-042:** criar `CalendarAllocation` com `tstzrange`, `active` e constraint GiST por tenant/recurso.
 - [ ] **MVP-043:** implementar alocacao transacional com conflito HTTP 409.
 - [ ] **MVP-044:** criar calendario semanal desktop e lista diaria mobile sem drag-and-drop.

@@ -7,10 +7,11 @@ import ServiceCatalog,{type Catalog} from "./ServiceCatalog";
 import {api} from "../lib/api";
 import PaymentSettings from "./PaymentSettings";
 import Publication from "./Publication";
-type Section="overview"|"profile"|"services"|"subscription"|"payments"|"publication";
+import Availability from "./Availability";
+type Section="overview"|"profile"|"services"|"subscription"|"payments"|"publication"|"availability";
 type Subscription={status:string;planCode:string;trialEndsAt:string|null;paidUntil:string|null};
 const states:Record<string,string>={TRIAL_ACTIVE:"Teste Premium ativo",TRIAL_EXPIRING:"Seu teste termina em breve",TRIAL_EXPIRED_BLOCKED:"Seu teste Premium terminou",PAID_ACTIVE:"Assinatura ativa",PAST_DUE:"Pagamento pendente",SUSPENDED:"Assinatura suspensa",CANCELED:"Assinatura cancelada"};
-const navigation=[{id:"overview",href:"/painel",name:"Visão geral"},{id:"profile",href:"/painel/minha-pagina",name:"Minha página"},{id:"services",href:"/painel/servicos",name:"Serviços"},{id:"payments",href:"/painel/pagamentos",name:"PIX e política"},{id:"publication",href:"/painel/publicacao",name:"Publicação"},{id:"subscription",href:"/painel/assinatura",name:"Assinatura"}];
+const navigation=[{id:"overview",href:"/painel",name:"Visão geral"},{id:"profile",href:"/painel/minha-pagina",name:"Minha página"},{id:"services",href:"/painel/servicos",name:"Serviços"},{id:"payments",href:"/painel/pagamentos",name:"PIX e política"},{id:"availability",href:"/painel/horarios",name:"Horários"},{id:"publication",href:"/painel/publicacao",name:"Publicação"},{id:"subscription",href:"/painel/assinatura",name:"Assinatura"}];
 export default function ProfessionalDashboard({section}:{section:Section}){
  const [subscription,setSubscription]=useState<Subscription|null>(null),[profile,setProfile]=useState<Profile|null>(null),[catalog,setCatalog]=useState<Catalog|null>(null),[error,setError]=useState("");
  async function load(){setError("");try{const [s,p,c]=await Promise.all([api("/admin/subscription"),api("/admin/profile"),api("/admin/services")]);setSubscription(s);setProfile(p);setCatalog(c);}catch(e){setError(e instanceof Error?e.message:"Falha ao carregar.");}}
@@ -25,6 +26,7 @@ export default function ProfessionalDashboard({section}:{section:Section}){
  {section==="profile"&&profile&&<><h1>Minha página</h1><ProfessionalProfile profile={profile} operational={operational} onChange={setProfile} onBlocked={load}/></>}
  {section==="services"&&<ServiceCatalog operational={operational} onBlocked={load}/>}
  {section==="publication"&&<Publication/>}
+ {section==="availability"&&<Availability operational={operational} onBlocked={load}/>}
  {section==="payments"&&<PaymentSettings operational={operational} onBlocked={load}/>}
  {section==="subscription"&&<section className="profile-panel"><h1>Sua assinatura</h1><p>O teste Premium/Top dura 7 dias. Seus dados permanecem preservados após o vencimento.</p><p>A confirmação de pagamento é feita pela administração do Agendou após conferência. Não há cobrança automática nesta etapa.</p></section>}
  </>}

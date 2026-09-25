@@ -130,6 +130,8 @@ O quadro inicial acima é o plano de domínio. O histórico real até esta etapa
 
 As próximas migrations devem continuar a numeração existente, sem reutilizar versões do quadro planejado.
 
+- V010: availability_settings, documento JSONB privado por tenant, versão e updated_at UTC. FORCE RLS, SELECT/INSERT/UPDATE para runtime. Semana e datas especiais representam regras locais no fuso do perfil; não são reservas nem alocações UTC. ADR-0010.
+
 - V009: public_profiles.published inicia false; leitores SECURITY DEFINER com projeção pública restrita e logo somente de páginas publicadas. EXECUTE somente para runtime, sem alterar políticas RLS. Nenhuma conta publicada pela migration. ADR-0009 descreve permissões e gate de disponibilidade pendente.
 
 - V008: payment_settings_versions com chave/recebedor/politicas, enabled, versao, ator, motivo, campos alterados e correlation ID. RLS e FK de membership; runtime somente SELECT/INSERT. Dados atuais pela maior versao; reservas futuras deverao referenciar/copiar a versao utilizada.
