@@ -2,7 +2,16 @@
 
 **Atualizado em:** 25/09/2026. Desenvolvimento na própria pasta do projeto.
 
-## Entrega mais recente em 25/09: gerador e prévia de horários (MVP-041)
+## Entrega mais recente em 25/09: alocações e bloqueios seguros (MVP-042/043, MVP-045 parcial)
+
+- V011: calendar_allocations com recurso único por tenant, UTC, buffers, faixa semiaberta, active e exclusão GiST; RLS e FK composta de serviço. Banco rejeita sobreposição ativa, inclusive se uma gravação contornar o lock da aplicação.
+- Núcleo transacional de ocupação temporária HOLD (30 min) verifica assinatura, serviço, expediente, ocupações, intervalo global e buffers sob lock do tenant. Sem endpoint público de reserva ou pagamento. Expirados são ignorados na leitura e desativados antes de novas mutações de alocação.
+- Nova seção **Bloquear um período específico** em Horários: início/fim no fuso do perfil, motivo privado, lista paginada e liberação sem exclusão do histórico. CSRF, assinatura, validação de período/offset e isolamento de tenant.
+- Prévia agora considera ocupações persistidas e é invalidada após criar/liberar bloqueio. Bloqueios pontuais continuam valendo mesmo após alterações do expediente.
+- Alteração de expediente/intervalo ou fuso é recusada com 409 enquanto existir HOLD futuro vigente. Corridas HOLD/bloqueio e HOLD/expediente têm um único vencedor. Ainda será necessário ampliar esta coordenação aos estados de Booking quando forem implementados.
+- OpenAPI 0.11.0 e ADR-0012. Próxima etapa: calendário diário/semanal MVP-044; publicação e reserva continuam pendentes.
+
+## Entrega anterior em 25/09: gerador e prévia de horários (MVP-041)
 
 - Na aba Horários, “Confira como fica o seu dia” calcula alternativas de início e uma sugestão de sequência por serviço e data, usando a configuração salva. Edições pendentes exigem salvar antes de consultar.
 - Semana, exceções/folgas, duração e buffers, intervalo global, fuso IANA, antecedência 24h, horizonte 60 dias e grade 15min. Tempos em UTC na API, exibidos no fuso do perfil.
@@ -119,9 +128,10 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 
 | Check | Evidência |
 |---|---|
-| `mvnw.cmd verify` | PASS: 27 testes unitários + 47 de integração (74 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
-| Migrations V001 a V010 | Aplicadas em bancos descartáveis, usando role real de runtime |
-| Atualização de banco existente | V003 → V010 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| `mvnw.cmd verify` | PASS: 27 testes unitários + 52 de integração (79 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
+| Migrations V001 a V011 | Aplicadas em bancos descartáveis, usando role real de runtime |
+| Atualização de banco existente | V003 → V011 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| Alocações/bloqueios | Corridas HOLD/bloqueio e HOLD/expediente, GiST direto, limites adjacentes, intervalo, expiração, fuso protegido, RLS/CSRF, bloqueio de assinatura e liberação sem excluir histórico |
 | Gerador de horários | Grade/fuso, antecedência/horizonte, pausas, exceções, duração/buffers, intervalo, limites semiabertos e DST; consulta isolada, serviço inativo/externo negado |
 | Horários | Semana, pausas, dia fechado, validação de períodos/dias, RLS, CSRF, isolamento, conflito concorrente e bloqueio de trial com leitura preservada |
 | Página/publicação | Rascunhos/logo privados, projeção só com serviços ativos, isolamento entre tenants, RLS direta, entrada em centavos, no-store, requisitos, CSRF, bloqueio de publicação e retirada sem perda de dados |
@@ -139,7 +149,7 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 | Regressão de negócio | Cadastro, sessão, RLS, bloqueio do trial, reativação, recuperação e logout continuam cobertos |
 | `npm run typecheck` e `npm run build` | PASS |
 
-Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da suíte atual: `apps/api/slots-verify.log`; build em `apps/web/slots-build.log`. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador da prévia de horários/publicação/PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
+Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da suíte atual: `apps/api/calendar-verify.log`; build em `apps/web/calendar-build.log`. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador de bloqueios/prévia de horários/publicação/PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
 
 ## Backlog: concluído e parcial
 
@@ -159,11 +169,12 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - **MVP-034/035 (parciais):** página, prévia privada e bloqueio/requisitos de publicação implementados; liberação pública e CTA dependem de disponibilidade/reserva reais.
 
 - **MVP-040:** configuração de expediente, pausas, exceções e bloqueios concluída.
-- **MVP-041:** gerador e prévia privada concluídos; integração com ocupações reais depende de MVP-042/043/045.
+- **MVP-041:** gerador e prévia privada concluídos e integrados com alocações persistidas.
+- **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs; integração com Booking pendente.
 
 ## Próximas implementações
 
-1. **Próxima entrega — alocação segura (MVP-042/043/045):** CalendarAllocation com GiST, intervalos UTC semiabertos, exclusão de sobreposição, locks coordenados entre reserva/expediente/bloqueio e conflito HTTP 409. Integrar ocupações ao gerador; depois calendário diário/semanal MVP-044.
+1. **Próxima entrega — calendário administrativo (MVP-044):** visão semanal desktop e lista diária mobile, com expediente e bloqueios reais, sem drag-and-drop ou compromissos fictícios. Ampliar com reservas quando Booking existir; concluir MVP-045 para esses estados no fluxo de reserva.
 2. **Concluir publicação (MVP-034/035):** substituir o bloqueio de disponibilidade pelo cálculo real, validar todos os requisitos no servidor e liberar publicação explícita. CTA só inicia reservas quando o fluxo estiver funcional; PIX nunca aparece na página geral.
 3. **Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático.
 4. **Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056).
@@ -176,7 +187,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 |---|---|
 | Acesso superadmin | Implementado e acesso com autenticador confirmado pela responsável |
 | Página com logomarca do profissional | Página e prévia em Publicação implementadas; liberação pública depende de disponibilidade real |
-| Calendário e disponibilidade | Configuração e prévia MVP-040/041 concluídas; alocações e agenda MVP-042 a 045 pendentes |
+| Calendário e disponibilidade | Configuração, prévia e alocações MVP-040 a 043 concluídas; calendário MVP-044 e integração futura de reservas em MVP-045 pendentes |
 | Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
 | Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
 | Compartilhar link e mensagem no WhatsApp | MVP-036 explicitado no backlog; copiar/abrir mensagem, sem envio automático |
@@ -186,7 +197,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Banco local atualizado até V010 e API reiniciada na porta 8080 em 25/09; frontend na porta 3000, com resposta HTTP 200 em `/painel/horarios`, health da API UP e 404 para slug público inexistente. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Banco local atualizado até V011 e API reiniciada na porta 8080 em 25/09; frontend na porta 3000, com resposta HTTP 200 em `/painel/horarios`, health da API UP e 404 para slug público inexistente. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
 - Agenda da home é ilustrativa. Página e prévia estão implementadas, mas publicação funcional, reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas terão idempotência própria em MVP-053.
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.

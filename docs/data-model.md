@@ -130,6 +130,8 @@ O quadro inicial acima é o plano de domínio. O histórico real até esta etapa
 
 As próximas migrations devem continuar a numeração existente, sem reutilizar versões do quadro planejado.
 
+- V011: calendar_allocations com tenant/recurso único, tipos BLOCK/HOLD, serviço por FK composta, instantes UTC, buffers, faixa protegida semiaberta, active/expires_at/released_at e GiST de exclusão. FORCE RLS; runtime sem DELETE. Intervalo global validado sob lock na aplicação. HOLD ainda interno, sem Booking/cliente/pagamento. ADR-0012.
+
 - V010: availability_settings, documento JSONB privado por tenant, versão e updated_at UTC. FORCE RLS, SELECT/INSERT/UPDATE para runtime. Semana e datas especiais representam regras locais no fuso do perfil; não são reservas nem alocações UTC. ADR-0010.
 
 - V009: public_profiles.published inicia false; leitores SECURITY DEFINER com projeção pública restrita e logo somente de páginas publicadas. EXECUTE somente para runtime, sem alterar políticas RLS. Nenhuma conta publicada pela migration. ADR-0009 descreve permissões e gate de disponibilidade pendente.

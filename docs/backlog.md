@@ -67,11 +67,11 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 **Objetivo:** gerar horarios confiaveis e impedir dupla reserva.
 
 - [x] **MVP-040:** aba Horários com dias/períodos semanais, pausas por intervalos separados e exceções por data; feriado/bloqueio total sem períodos, bloqueio parcial por expediente excepcional. RLS, assinatura, CSRF e versão concorrente. Geração/aplicação em slots depende de MVP-041 a 045.
-- [x] **MVP-041:** gerador e prévia privada por serviço/data; duração/buffers, grade 15min, antecedência 24h, horizonte 60 dias, fuso e exceções. Sequência ilustrativa respeita intervalo global. Períodos que cruzam transição de offset são omitidos (ADR-0011). Integração com ocupações persistidas depende de MVP-042/043/045.
-- [ ] **MVP-042:** criar `CalendarAllocation` com `tstzrange`, `active` e constraint GiST por tenant/recurso.
-- [ ] **MVP-043:** implementar alocacao transacional com conflito HTTP 409.
+- [x] **MVP-041:** gerador e prévia privada por serviço/data; duração/buffers, grade 15min, antecedência 24h, horizonte 60 dias, fuso e exceções. Sequência ilustrativa respeita intervalo global. Períodos que cruzam transição de offset são omitidos (ADR-0011). Integrado a ocupações persistidas desde V011; reservas de clientes ainda dependem de MVP-050+.
+- [x] **MVP-042:** calendar_allocations com faixa tstzrange semiaberta, active e GiST por tenant/recurso único, RLS e FK composta. V011.
+- [x] **MVP-043:** alocação transacional interna HOLD e bloqueio pessoal BLOCK, lock do tenant, conflito 409, expiração preguiçosa e prévia com ocupações reais. Endpoint público de reserva depende de MVP-050+.
 - [ ] **MVP-044:** criar calendario semanal desktop e lista diaria mobile sem drag-and-drop.
-- [ ] **MVP-045:** coordenar mudanca de expediente, bloqueio e reserva por ordem de locks.
+- [ ] **MVP-045 (parcial):** expediente/fuso, bloqueios e HOLDs coordenados pelo lock do tenant; ocupação temporária vigente impede alteração de expediente/fuso. Corridas testadas. Ampliar coordenação para estados de reservas confirmadas/reagendamento quando MVP-050+ existir.
 
 **Saida:** horarios publicos confiaveis e calendario administrativo funcional.
 

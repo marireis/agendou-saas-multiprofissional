@@ -7,7 +7,7 @@ import java.util.*;
 public final class SlotGenerator {
  public record Service(int duration,int before,int after){}
  public record Slot(Instant start,Instant end){}
- public record Occupied(Instant start,Instant end,int before,int after){}
+ public record Occupied(Instant start,Instant end,int before,int after,boolean block){public Occupied(Instant start,Instant end,int before,int after){this(start,end,before,after,false);}}
  public record Result(List<Slot> candidates,List<Slot> sequence){}
  public static Result generate(AvailabilityController.Schedule schedule,Service service,ZoneId zone,LocalDate date,Instant now,List<Occupied> occupied){
   LocalDate today=now.atZone(zone).toLocalDate();
@@ -38,6 +38,7 @@ public final class SlotGenerator {
   return new Result(candidates,List.copyOf(sequence));
  }
  static boolean conflicts(Slot slot,Service service,Occupied other,int gap){
+  if(other.block())gap=0;
   if(!slot.end().isAfter(other.start()))return slot.end().plusSeconds(Math.max(gap,service.after()+other.before())*60L).isAfter(other.start());
   if(!slot.start().isBefore(other.end()))return other.end().plusSeconds(Math.max(gap,other.after()+service.before())*60L).isAfter(slot.start());
   return true;

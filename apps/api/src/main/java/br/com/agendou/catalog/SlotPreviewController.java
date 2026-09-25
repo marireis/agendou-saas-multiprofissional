@@ -12,8 +12,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController @RequestMapping("/api/v1/admin/availability/slots")
 public class SlotPreviewController {
- private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final ObjectMapper json;private final Clock clock;
- public SlotPreviewController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,ObjectMapper json,Clock clock){this.jdbc=jdbc;this.tenants=tenants;this.json=json;this.clock=clock;}
+ private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final ObjectMapper json;private final Clock clock;private final CalendarService calendar;
+ public SlotPreviewController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,ObjectMapper json,Clock clock,CalendarService calendar){this.calendar=calendar;this.jdbc=jdbc;this.tenants=tenants;this.json=json;this.clock=clock;}
  @GetMapping @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
  public ResponseEntity<?> preview(@RequestParam UUID serviceId,@RequestParam LocalDate date)throws Exception{
   tenants.applyCurrentTenant();UUID tenant=TenantContext.require();Instant now=clock.instant();
@@ -23,7 +23,7 @@ public class SlotPreviewController {
   if(services.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Serviço ativo não encontrado.");
   var configs=jdbc.query("SELECT schedule::text FROM availability_settings WHERE tenant_id=?",(r,n)->r.getString(1),tenant);
   var schedule=configs.isEmpty()?new AvailabilityController.Schedule(List.of(),List.of(),0):json.readValue(configs.getFirst(),AvailabilityController.Schedule.class);
-  var result=SlotGenerator.generate(schedule,services.getFirst(),zone,date,now,List.of());
+  var result=SlotGenerator.generate(schedule,services.getFirst(),zone,date,now,calendar.occupied());
   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Map.of("date",date,"timezone",zone.getId(),"today",today,"lastDate",today.plusDays(59),"intervalMinutes",schedule.intervalMinutes(),"bookingAvailable",false,"candidates",result.candidates(),"sequence",result.sequence()));
  }
 }

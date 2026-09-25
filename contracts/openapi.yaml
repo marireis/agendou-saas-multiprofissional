@@ -1,17 +1,78 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.10.0
+  version: 0.11.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /admin/calendar/blocks:
+    get:
+      summary: Bloqueios pontuais ativos do próprio tenant, incluindo em andamento
+      parameters:
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+      responses:
+        '200':
+          description: Até 50 itens por página, sem cache; leitura preservada após bloqueio de assinatura
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timezone: {type: string}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        start: {type: string, format: date-time}
+                        end: {type: string, format: date-time}
+                        reason: {type: string}
+        '401': {description: Sessão necessária}
+    post:
+      summary: Bloquear período futuro no recurso único do profissional
+      description: CSRF e assinatura operacional. Datas locais no fuso do perfil, sem offset; convertidas para UTC. Limites ambíguos/inexistentes rejeitados. Não cria reserva de cliente nem pagamento.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start, end, reason]
+              properties:
+                start: {type: string, example: '2026-10-01T09:00'}
+                end: {type: string, example: '2026-10-01T10:00'}
+                reason: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '201':
+          description: Bloqueio criado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+        '401': {description: Sessão necessária}
+        '403': {description: CSRF ou assinatura bloqueada}
+        '409': {description: Sobreposição com bloqueio ou ocupação ativa; recarregar}
+        '422': {description: Intervalo inválido, no passado, maior que 366 dias ou horário ambíguo/inexistente}
+  /admin/calendar/blocks/{id}:
+    delete:
+      summary: Liberar bloqueio próprio preservando registro histórico
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Liberado, inclusive repetição de liberação}
+        '401': {description: Sessão necessária}
+        '403': {description: CSRF ou assinatura bloqueada}
+        '404': {description: Bloqueio inexistente ou de outro tenant}
   /admin/availability/slots:
     get:
       summary: Prévia privada de candidatos e sequência de atendimentos sem criar reservas
-      description: Usa configuração salva, serviço ativo do tenant e fuso do perfil; antecedência 24h, horizonte de hoje a hoje+59 dias, grade local 15min. Períodos que atravessam mudança de offset são omitidos. Candidatos são alternativas; sequência respeita intervalo e buffers. Sem consulta a alocações persistidas nesta etapa.
+      description: Usa configuração salva, serviço ativo do tenant e fuso do perfil; antecedência 24h, horizonte de hoje a hoje+59 dias, grade local 15min. Períodos que atravessam mudança de offset são omitidos. Candidatos são alternativas; sequência respeita intervalo e buffers. Consulta alocações ativas e ignora HOLDs expirados. Bloqueios usam a faixa exata mais buffers do serviço, sem intervalo global adicional.
       parameters:
         - {name: serviceId, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: date, in: query, required: true, schema: {type: string, format: date}}
@@ -658,7 +719,7 @@ components:
       type: object
       required: [weekly, exceptions]
       properties:
-        intervalMinutes: {type: integer, minimum: 0, maximum: 240, default: 0, description: 'Tempo livre mínimo entre atendimentos, em todos os dias. Ausente/null em documentos antigos vira zero. Aplicado à sequência da prévia; integração com ocupações reais depende de MVP-042/043/045.'}
+        intervalMinutes: {type: integer, minimum: 0, maximum: 240, default: 0, description: 'Tempo livre mínimo entre atendimentos, em todos os dias. Ausente/null em documentos antigos vira zero. Aplicado à sequência e ao conflito entre atendimentos persistidos; bloqueios pontuais não adicionam intervalo global.'}
         weekly:
           type: array
           maxItems: 7

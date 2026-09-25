@@ -15,8 +15,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController @RequestMapping("/api/v1/admin/availability")
 public class AvailabilityController {
- private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final ObjectMapper json;
- public AvailabilityController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,ObjectMapper json){this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.json=json;}
+ private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final ObjectMapper json;private final CalendarService calendar;
+ public AvailabilityController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,ObjectMapper json,CalendarService calendar){this.calendar=calendar;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.json=json;}
  public record Period(@NotNull LocalTime start,@NotNull LocalTime end){}
  public record Day(@Min(1) @Max(7) int day,@NotNull @Size(max=8) List<@NotNull @Valid Period> periods){}
  public record ExceptionDay(@NotNull LocalDate date,@NotNull @Size(max=100) String reason,@NotNull @Size(max=8) List<@NotNull @Valid Period> periods){}
@@ -29,7 +29,7 @@ public class AvailabilityController {
   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(result);
  }
  @PutMapping @Transactional public ResponseEntity<?> save(@Valid @RequestBody Edit body)throws Exception{
-  subscriptions.requireOperational(TenantContext.require());tenants.applyCurrentTenant();validate(body.schedule());
+  subscriptions.requireOperational(TenantContext.require());tenants.applyCurrentTenant();validate(body.schedule());calendar.requireNoFutureHolds();
   int version=jdbc.queryForObject("SELECT coalesce((SELECT version FROM availability_settings WHERE tenant_id=?),0)",Integer.class,TenantContext.require());
   if(version!=body.version())throw new ResponseStatusException(HttpStatus.CONFLICT,"Os horários foram alterados em outra janela. Recarregue antes de salvar.");
   jdbc.update("INSERT INTO availability_settings(tenant_id,version,schedule) VALUES (?,?,?::jsonb) ON CONFLICT(tenant_id) DO UPDATE SET version=excluded.version,schedule=excluded.schedule,updated_at=now()",TenantContext.require(),version+1,json.writeValueAsString(body.schedule()));

@@ -4,7 +4,9 @@ Todas as rotas abaixo ficam sob `/api/v1`. Erros retornam `code`, `message`, `co
 
 ## 1. Convencoes
 
-Prévia (OpenAPI 0.10.0): `GET /admin/availability/slots?serviceId={uuid}&date={yyyy-MM-dd}` retorna candidates e sequence em UTC, timezone, intervalMinutes e bookingAvailable=false. A data usa o fuso do perfil, hoje a hoje+59; início pelo menos 24h adiante. Serviço ativo do próprio tenant; 404 genérico caso contrário. Sem cache, sem criação de reserva e sem consulta a alocações persistidas. Períodos que cruzam transição de offset são omitidos conforme ADR-0011.
+Alocações (OpenAPI 0.11.0): `GET/POST /admin/calendar/blocks` lista/cria bloqueios pontuais e `DELETE /admin/calendar/blocks/{id}` desativa o próprio bloqueio. POST recebe start/end locais sem offset e reason; horários resolvidos no fuso do perfil, limites ambíguos/inexistentes rejeitados. CSRF/assinatura nas mutações; 409 para sobreposição. A prévia agora consulta ocupações persistidas. HOLD é primitiva interna, sem endpoint público de reserva. PUT do expediente ou mudança de fuso retorna 409 enquanto houver HOLD futuro vigente. ADR-0012.
+
+Prévia (OpenAPI 0.10.0): `GET /admin/availability/slots?serviceId={uuid}&date={yyyy-MM-dd}` retorna candidates e sequence em UTC, timezone, intervalMinutes e bookingAvailable=false. A data usa o fuso do perfil, hoje a hoje+59; início pelo menos 24h adiante. Serviço ativo do próprio tenant; 404 genérico caso contrário. Sem cache e sem criação de reserva; consulta alocações persistidas desde a entrega V011. Períodos que cruzam transição de offset são omitidos conforme ADR-0011.
 
 Complemento de horários: `schedule.intervalMinutes` no GET/PUT aceita inteiro 0–240; ausência/null tem padrão zero para compatibilidade. Representa tempo livre mínimo entre atendimentos, global inclusive em datas especiais. O gerador combina essa regra com duração e buffers dos serviços; não é intervalo da grade de slots.
 

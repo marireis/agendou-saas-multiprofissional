@@ -15,8 +15,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/admin/profile")
 public class ProfileController {
- private final JdbcTemplate jdbc; private final TenantSessionConfigurer tenants; private final SubscriptionService subscriptions; private final LogoSanitizer logos;
- public ProfileController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,LogoSanitizer logos) {this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.logos=logos;}
+ private final JdbcTemplate jdbc; private final TenantSessionConfigurer tenants; private final SubscriptionService subscriptions; private final LogoSanitizer logos;private final CalendarService calendar;
+ public ProfileController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,LogoSanitizer logos,CalendarService calendar) {this.calendar=calendar;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.logos=logos;}
  @GetMapping @Transactional(readOnly=true) public Profile get() {
   tenants.applyCurrentTenant();
   return jdbc.queryForObject("""
@@ -28,6 +28,7 @@ public class ProfileController {
   subscriptions.requireOperational(TenantContext.require());
   if(!ZoneId.getAvailableZoneIds().contains(body.timezone())) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Escolha um fuso IANA válido, como America/Sao_Paulo.");
   tenants.applyCurrentTenant();
+  if(!body.timezone().equals(jdbc.queryForObject("SELECT timezone FROM public_profiles WHERE tenant_id=?",String.class,TenantContext.require())))calendar.requireNoFutureHolds();
   jdbc.update("UPDATE tenants SET display_name=?,updated_at=now() WHERE id=?",body.name().trim(),TenantContext.require());
   // Null new fields preserve old-client compatibility; empty strings clear a saved draft.
   jdbc.update("""
