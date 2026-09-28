@@ -1,13 +1,62 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.11.0
+  version: 0.14.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /admin/calendar:
+    get:
+      summary: Calendário privado diário, semanal ou mensal com disponibilidade e ocupações vigentes
+      description: Snapshot consistente, sem cache e com RLS. Limites civis no fuso do perfil, inclusive dias de 23/25 horas. Inclui faixas protegidas que atravessam o período; omite alocações liberadas e HOLDs expirados. Datas passadas mostram expediente atual, não histórico de configuração. Consulta permitida após bloqueio da assinatura.
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}, description: 'Primeiro dia inclusivo; padrão hoje no fuso do perfil, ano 2000 a 2100'}
+        - {name: days, in: query, schema: {type: integer, enum: [1, 7, 42], default: 7}, description: '42 dias permitem a grade mensal de seis semanas'}
+      responses:
+        '200':
+          description: Datas, expediente e faixas ocupadas reais; não representa reservas confirmadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timezone: {type: string}
+                  today: {type: string, format: date}
+                  from: {type: string, format: date}
+                  generatedAt: {type: string, format: date-time}
+                  intervalMinutes: {type: integer}
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: {type: string, format: date}
+                        start: {type: string, format: date-time}
+                        end: {type: string, format: date-time}
+                        exception: {type: boolean}
+                        status: {type: string, enum: [FREE, OCCUPIED, UNAVAILABLE], description: 'UNAVAILABLE tem prioridade se nenhum serviço ativo possui início disponível. OCCUPIED indica ocupação temporária e disponibilidade restante; FREE indica disponibilidade sem ocupações. Considera todas as regras do gerador.'}
+                        occupiedCount: {type: integer, minimum: 0, description: 'Ocupações não BLOCK cujo atendimento cruza o dia; não representa reservas confirmadas'}
+                        reason: {type: string}
+                        periods: {type: array, items: {$ref: '#/components/schemas/AvailabilityPeriod'}}
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        kind: {type: string, enum: [BLOCK, HOLD]}
+                        start: {type: string, format: date-time}
+                        end: {type: string, format: date-time}
+                        protectedStart: {type: string, format: date-time}
+                        protectedEnd: {type: string, format: date-time}
+                        expiresAt: {type: [string, 'null'], format: date-time}
+                        reason: {type: string}
+        '400': {description: Data malformada ou quantidade de dias diferente de 1/7/42}
+        '401': {description: Sessão necessária}
+        '422': {description: Ano fora de 2000 a 2100}
   /admin/calendar/blocks:
     get:
       summary: Bloqueios pontuais ativos do próprio tenant, incluindo em andamento
@@ -135,7 +184,7 @@ paths:
       summary: Estado e requisitos reais de publicação do profissional autenticado
       responses:
         '200':
-          description: Sem cache; disponibilidade ainda pendente nesta versão
+          description: Sem cache; requisitos calculados sob lock do tenant, incluindo candidatos reais nos próximos 60 dias
           content:
             application/json:
               schema:
@@ -143,14 +192,16 @@ paths:
                 required: [published, canPublish, missingRequirements, path]
                 properties:
                   published: {type: boolean}
-                  canPublish: {type: boolean, const: false}
+                  canPublish: {type: boolean}
                   missingRequirements: {type: array, items: {type: string}}
                   path: {type: string}
         '401': {description: Sessão necessária}
     post:
-      summary: Solicitar publicação (bloqueada até MVP-040 a 045)
+      summary: Publicar explicitamente a própria página após revalidar os requisitos
+      description: Exige perfil completo, assinatura operacional, serviço ativo, PIX/política ativos e horário livre real no horizonte de 60 dias. Mesma coordenação das mutações de configuração e calendário. Não habilita reservas nem expõe a chave PIX. Nenhuma publicação automática.
       responses:
-        '409': {description: Disponibilidade não implementada; nenhuma publicação realizada}
+        '204': {description: Página publicada; repetir com requisitos válidos não duplica efeitos}
+        '409': {description: Requisitos não atendidos; nenhuma publicação realizada}
         '403': {description: Assinatura bloqueada ou CSRF inválido}
         '401': {description: Sessão necessária}
     delete:

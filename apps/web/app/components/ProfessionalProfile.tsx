@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
+import BusinessLocation from "./BusinessLocation";
 
 export type Profile = {
   name: string; slug: string; description: string; timezone: string;
@@ -52,13 +53,13 @@ export default function ProfessionalProfile({ profile, operational, onChange, on
       <section className="profile-panel"><h2>Identidade do negócio</h2><p>Estas informações vão apresentar seu atendimento aos clientes.</p>
         <form onSubmit={save} aria-busy={busy}><fieldset disabled={busy || !operational}>
           <label>Nome do negócio<input value={draft.name} onChange={e=>field("name",e.target.value)} required maxLength={100} autoComplete="organization" /></label>
-          <label>Endereço reservado<input value={`/a/${profile.slug}`} readOnly aria-describedby="slug-note" /></label><small id="slug-note">Esse endereço foi escolhido no cadastro. Sua página ainda não está publicada.</small>
+          <label>Link da sua página<input value={`/a/${profile.slug}`} readOnly aria-describedby="slug-note" /></label><small id="slug-note">Esse link foi escolhido no cadastro. Consulte a aba Publicação para publicar ou retirar sua página.</small>
           <label>Descrição<textarea value={draft.description} onChange={e=>field("description",e.target.value)} maxLength={2000} rows={4} placeholder="Conte o que você faz e como atende seus clientes." /></label>
           <div className="profile-fields"><label>Email de contato<input type="email" value={draft.contactEmail} onChange={e=>field("contactEmail",e.target.value)} maxLength={254} autoComplete="email" /></label><label>Telefone de contato<input type="tel" value={draft.contactPhone} onChange={e=>field("contactPhone",e.target.value)} maxLength={24} placeholder="+55 11 99999-9999" autoComplete="tel" /></label></div>
           <small>Informe pelo menos um contato comercial para completar o perfil. Ele será exibido quando você publicar sua página.</small>
           <div className="profile-fields"><label>Modalidade de atendimento<select value={draft.serviceMode} onChange={e=>field("serviceMode",e.target.value)}>{Object.entries(modes).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
           <label>Fuso do negócio<input list="profile-timezones" value={draft.timezone} onChange={e=>field("timezone",e.target.value)} required maxLength={100} /><datalist id="profile-timezones">{zones.map(zone=><option key={zone} value={zone}/>)}</datalist></label></div>
-          {local && <label>Local de atendimento<textarea value={draft.location} onChange={e=>field("location",e.target.value)} maxLength={500} rows={3} placeholder="Endereço ou orientações de chegada" autoComplete="street-address" /></label>}
+          {local && <><label>Endereço do seu espaço<textarea value={draft.location} onChange={e=>field("location",e.target.value)} maxLength={500} rows={3} placeholder="Rua, número, bairro, cidade, estado e CEP" autoComplete="street-address" aria-describedby="location-note" /></label><small id="location-note">Informe o endereço completo onde recebe seus clientes. Ele será exibido na página publicada, com acesso ao mapa e às rotas. Confira se o mapa encontra o local correto antes de publicar.</small>{draft.location.trim()&&<BusinessLocation address={draft.location} preview/>}</>}
           {draft.serviceMode==="ONLINE" && <p>O atendimento será apresentado como online. Não inclua links privados de reunião no perfil.</p>}
           <div className="profile-actions"><button className="primary-button">{busy?"Salvando…":"Salvar perfil"}</button><button type="button" className="secondary-button" onClick={()=>setDraft(profile)}>Desfazer edição</button></div>
         </fieldset></form>

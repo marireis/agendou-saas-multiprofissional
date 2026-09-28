@@ -22,6 +22,54 @@ class PublicPageJourneyIT {
  @Container static PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:17").withUsername("agendou_app").withPassword("agendou_app");
  @DynamicPropertySource static void database(DynamicPropertyRegistry p){p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.flyway.url",postgres::getJdbcUrl);}
  @Autowired MockMvc mvc;@Autowired AuthService auth;@Autowired JdbcTemplate runtime;
+ @Autowired com.fasterxml.jackson.databind.ObjectMapper json;
+ void ready(Account a)throws Exception{
+  owner().update("UPDATE public_profiles SET description='Atendimento de teste',contact_email='public@example.test',service_mode='ONLINE' WHERE tenant_id=?",a.tenant);
+  owner().update("INSERT INTO services(id,tenant_id,name,description,duration_minutes,price_cents,buffer_before_minutes,buffer_after_minutes,deposit_percent,active) VALUES (?,?,'Consulta','Serviço de teste',30,10000,0,0,50,true)",UUID.randomUUID(),a.tenant);
+  mvc.perform(put("/api/v1/admin/payment-settings").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("version",0,"keyType","EMAIL","pixKey","private@example.test","recipientName","Recebedor teste","paymentInstructions","Instruções privadas para pagamento.","cancellationPolicy","Solicite cancelamento pelo contato.","enabled",true,"confirmed",true,"changeReason","Configuração para teste")))).andExpect(status().isOk());
+  var date=java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")).plusDays(2);
+  var schedule=Map.of("intervalMinutes",0,"weekly",List.of(),"exceptions",List.of(Map.of("date",date.toString(),"reason","Motivo privado","periods",List.of(Map.of("start","09:00","end","10:00")))));
+  mvc.perform(put("/api/v1/admin/availability").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("version",0,"schedule",schedule)))).andExpect(status().isOk());
+ }
+ @Test void eligiblePageRequiresExplicitPublicationAndCanBeWithdrawn()throws Exception{
+  var a=account();var b=account();ready(a);
+  mvc.perform(get("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(jsonPath("$.canPublish").value(true)).andExpect(jsonPath("$.published").value(false)).andExpect(jsonPath("$.missingRequirements").isEmpty());
+  mvc.perform(get("/api/v1/public/pages/"+a.slug)).andExpect(status().isNotFound());
+  mvc.perform(post("/api/v1/admin/publication").with(user(b.id.toString())).with(csrf()).param("tenantId",a.tenant.toString())).andExpect(status().isConflict());
+  mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(status().isForbidden());
+  for(int i=0;i<2;i++)mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isNoContent());
+  String page=mvc.perform(get("/api/v1/public/pages/"+a.slug)).andExpect(status().isOk()).andExpect(jsonPath("$.bookingAvailable").value(false)).andReturn().getResponse().getContentAsString();
+  assertThat(page).contains("public@example.test").doesNotContain("private@example.test","Motivo privado","Instruções privadas",a.tenant.toString());
+  mvc.perform(delete("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(get("/api/v1/public/pages/"+a.slug)).andExpect(status().isNotFound());
+ }
+ @Test void publicationRechecksRequirementsAfterPreview()throws Exception{
+  var a=account();ready(a);
+  mvc.perform(get("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(jsonPath("$.canPublish").value(true));
+  owner().update("UPDATE services SET active=false WHERE tenant_id=?",a.tenant);
+  mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isConflict());
+  owner().update("UPDATE services SET active=true WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE public_profiles SET description='' WHERE tenant_id=?",a.tenant);
+  mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isConflict());
+  owner().update("UPDATE public_profiles SET description='Completo' WHERE tenant_id=?",a.tenant);
+  var payment=Map.of("version",1,"keyType","EMAIL","pixKey","private@example.test","recipientName","Recebedor teste","paymentInstructions","Instruções privadas para pagamento.","cancellationPolicy","Solicite cancelamento pelo contato.","enabled",false,"confirmed",true,"changeReason","Desativação para teste");
+  mvc.perform(put("/api/v1/admin/payment-settings").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(json.writeValueAsBytes(payment))).andExpect(status().isOk());
+  mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isConflict());
+  mvc.perform(get("/api/v1/public/pages/"+a.slug)).andExpect(status().isNotFound());
+ }
+ @Test void actualAvailabilityIncludesBlocksDurationAndExceptions()throws Exception{
+  var a=account();ready(a);
+  owner().update("UPDATE services SET duration_minutes=120 WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(jsonPath("$.canPublish").value(false));
+  owner().update("UPDATE services SET duration_minutes=30 WHERE tenant_id=?",a.tenant);
+  var day=java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")).plusDays(2);
+  var start=day.atTime(9,0).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toInstant();
+  owner().update("INSERT INTO calendar_allocations(id,tenant_id,resource_id,kind,starts_at,ends_at,buffer_before,buffer_after,protected_start,protected_end,reason) VALUES (?,?,?,'BLOCK',?,?,0,0,?,?,'Privado')",UUID.randomUUID(),a.tenant,a.tenant,java.sql.Timestamp.from(start),java.sql.Timestamp.from(start.plusSeconds(3600)),java.sql.Timestamp.from(start),java.sql.Timestamp.from(start.plusSeconds(3600)));
+  mvc.perform(get("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(jsonPath("$.canPublish").value(false));
+  mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isConflict());
+  owner().update("UPDATE calendar_allocations SET active=false WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/admin/publication").with(user(a.id.toString()))).andExpect(jsonPath("$.canPublish").value(true));
+ }
  JdbcTemplate owner(){return new JdbcTemplate(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));}
  record Account(UUID id,UUID tenant,String slug){}
  Account account(){String email=UUID.randomUUID()+"@example.test",slug="studio-"+UUID.randomUUID();auth.register(email,"synthetic-password-123","Studio teste",slug);return owner().queryForObject("SELECT u.id,m.tenant_id FROM app_users u JOIN memberships m ON m.user_id=u.id WHERE u.email=?",(r,n)->new Account(r.getObject(1,UUID.class),r.getObject(2,UUID.class),slug),email);}

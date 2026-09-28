@@ -56,8 +56,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [x] **MVP-031:** upload de logo ate 2 MB com validacao por conteudo e variante PNG sanitizada; consulta autenticada nesta etapa, exposicao publica depende de MVP-034/035. Persistencia compacta no banco conforme ADR-0006.
 - [x] **MVP-032:** cadastro, edicao, inativacao/reativacao de servicos com duracao 5-480 min, preco positivo, buffers 0-240 min e entrada 50-100%; RLS, bloqueio por assinatura e versao contra sobrescrita concorrente.
 - [x] **MVP-033:** formulario PIX, recebedor, instrucoes/politica, validacao local e auditoria com versoes imutaveis (V008). Referencia/copia por reserva depende do MVP-052; nao existe confirmacao bancaria automatica.
-- [ ] **MVP-034 (parcial):** página `/a/{slug}`, perfil/logo, serviços ativos, preços/entrada, estado indisponível e prévia privada implementados. CTA permanece desabilitado até disponibilidade/reserva reais.
-- [ ] **MVP-035 (parcial):** requisitos calculados, rascunho privado, retirada e bloqueio de publicação implementados. Liberação efetiva depende de disponibilidade MVP-040 a 045; nenhuma conta publicada automaticamente.
+- [x] **MVP-034:** página `/a/{slug}`, perfil/logo, serviços ativos, preços/entrada e prévia privada. Publicação explícita disponível; CTA de reserva integrado futuramente no MVP-050.
+- [x] **MVP-035:** requisitos reais de perfil/assinatura/serviço/PIX/disponibilidade, publicação explícita com revalidação sob lock e retirada sem excluir dados. Nenhuma conta publicada automaticamente. ADR-0014.
 - [ ] **MVP-036:** aba Compartilhar com copiar link publico e mensagem editavel para abrir no WhatsApp; agenda precisa estar publicada, sem envio automatico ou integracao simulada.
 
 **Saida:** catalogo e pagina publica prontos para publicar apos disponibilidade.
@@ -70,7 +70,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [x] **MVP-041:** gerador e prévia privada por serviço/data; duração/buffers, grade 15min, antecedência 24h, horizonte 60 dias, fuso e exceções. Sequência ilustrativa respeita intervalo global. Períodos que cruzam transição de offset são omitidos (ADR-0011). Integrado a ocupações persistidas desde V011; reservas de clientes ainda dependem de MVP-050+.
 - [x] **MVP-042:** calendar_allocations com faixa tstzrange semiaberta, active e GiST por tenant/recurso único, RLS e FK composta. V011.
 - [x] **MVP-043:** alocação transacional interna HOLD e bloqueio pessoal BLOCK, lock do tenant, conflito 409, expiração preguiçosa e prévia com ocupações reais. Endpoint público de reserva depende de MVP-050+.
-- [ ] **MVP-044:** criar calendario semanal desktop e lista diaria mobile sem drag-and-drop.
+- [x] **MVP-044:** aba Calendário com grade mensal/semanal e lista diária, pontos de disponibilidade real, navegação/Hoje, expediente/exceções e ocupações reais; consulta por período com RLS, limites civis no fuso, faixas atravessando dias e expiração. Criação/liberação de bloqueios integrada; sem drag-and-drop ou reservas fictícias. ADR-0013.
 - [ ] **MVP-045 (parcial):** expediente/fuso, bloqueios e HOLDs coordenados pelo lock do tenant; ocupação temporária vigente impede alteração de expediente/fuso. Corridas testadas. Ampliar coordenação para estados de reservas confirmadas/reagendamento quando MVP-050+ existir.
 
 **Saida:** horarios publicos confiaveis e calendario administrativo funcional.

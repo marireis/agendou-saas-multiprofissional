@@ -77,6 +77,50 @@ class CalendarJourneyIT {
   owner().update("INSERT INTO calendar_allocations(id,tenant_id,resource_id,kind,starts_at,ends_at,buffer_before,buffer_after,protected_start,protected_end) SELECT ?,tenant_id,resource_id,kind,ends_at,ends_at+interval '1 hour',0,0,ends_at,ends_at+interval '1 hour' FROM calendar_allocations WHERE tenant_id=?",UUID.randomUUID(),f.account.tenant);
   assertThat(owner().queryForObject("SELECT count(*) FROM calendar_allocations WHERE tenant_id=? AND active",Long.class,f.account.tenant)).isEqualTo(2);
  }
+ @Test void calendarIncludesCrossingBlocksExceptionsAndExcludesExpiredHolds()throws Exception{
+  var f=fixture();var other=account();
+  String block="{\"start\":\""+f.date.minusDays(1)+"T23:00\",\"end\":\""+f.date+"T10:00\",\"reason\":\"Ausência\"}";
+  mvc.perform(post("/api/v1/admin/calendar/blocks").with(user(f.account.id.toString())).with(csrf()).contentType("application/json").content(block)).andExpect(status().isCreated());
+  UUID held=hold(f,f.start.plusSeconds(7200));
+  String path="/api/v1/admin/calendar?from="+f.date+"&days=1";
+  mvc.perform(get(path)).andExpect(status().isUnauthorized());
+  mvc.perform(get(path).with(user(other.id.toString()))).andExpect(jsonPath("$.events").isEmpty());
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.events.length()").value(2)).andExpect(jsonPath("$.days[0].periods[0].start").value("09:00:00"));
+  owner().update("UPDATE calendar_allocations SET expires_at=now()-interval '1 second' WHERE id=?",held);
+  String schedule="{\"weekly\":[],\"exceptions\":[{\"date\":\""+f.date+"\",\"reason\":\"Folga\",\"periods\":[]}]}";
+  owner().update("UPDATE availability_settings SET schedule=?::jsonb WHERE tenant_id=?",schedule,f.account.tenant);
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",f.account.tenant);
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(status().isOk()).andExpect(jsonPath("$.events.length()").value(1)).andExpect(jsonPath("$.events[0].kind").value("BLOCK")).andExpect(jsonPath("$.days[0].exception").value(true)).andExpect(jsonPath("$.days[0].periods").isEmpty());
+ }
+ @Test void calendarUsesCivilDayBoundsAcrossDstAndValidatesRange()throws Exception{
+  var a=account();owner().update("UPDATE public_profiles SET timezone='America/New_York' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/admin/calendar?from=2026-03-08&days=1").with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(jsonPath("$.days[0].start").value("2026-03-08T05:00:00Z")).andExpect(jsonPath("$.days[0].end").value("2026-03-09T04:00:00Z"));
+  mvc.perform(get("/api/v1/admin/calendar?from=2026-11-01&days=1").with(user(a.id.toString()))).andExpect(jsonPath("$.days[0].start").value("2026-11-01T04:00:00Z")).andExpect(jsonPath("$.days[0].end").value("2026-11-02T05:00:00Z"));
+  mvc.perform(get("/api/v1/admin/calendar?days=8").with(user(a.id.toString()))).andExpect(status().isBadRequest());
+  mvc.perform(get("/api/v1/admin/calendar?from=9999-01-01").with(user(a.id.toString()))).andExpect(status().isUnprocessableEntity());
+  mvc.perform(get("/api/v1/admin/calendar").with(user(a.id.toString()))).andExpect(jsonPath("$.days.length()").value(7));
+ }
+ @Test void calendarExcludesTouchingBoundaryAndReleasedBlocks()throws Exception{
+  var f=fixture();assertThat(createBlock(f)).isEqualTo(201);
+  UUID id=owner().queryForObject("SELECT id FROM calendar_allocations WHERE tenant_id=?",UUID.class,f.account.tenant);
+  owner().update("UPDATE calendar_allocations SET starts_at=?::timestamptz,protected_start=?::timestamptz,ends_at=?::timestamptz,protected_end=?::timestamptz WHERE id=?",f.date.minusDays(1)+"T23:00:00-03:00",f.date.minusDays(1)+"T23:00:00-03:00",f.date+"T00:00:00-03:00",f.date+"T00:00:00-03:00",id);
+  mvc.perform(get("/api/v1/admin/calendar?from="+f.date+"&days=1").with(user(f.account.id.toString()))).andExpect(jsonPath("$.events").isEmpty());
+  mvc.perform(delete("/api/v1/admin/calendar/blocks/"+id).with(user(f.account.id.toString())).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(get("/api/v1/admin/calendar?from="+f.date.minusDays(1)+"&days=7").with(user(f.account.id.toString()))).andExpect(jsonPath("$.events").isEmpty());
+ }
+ @Test void monthAndStatusDotsReflectAvailableOccupiedAndFullDays()throws Exception{
+  var f=fixture();String path="/api/v1/admin/calendar?from="+f.date+"&days=42";
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(status().isOk()).andExpect(jsonPath("$.days.length()").value(42)).andExpect(jsonPath("$.days[0].status").value("FREE")).andExpect(jsonPath("$.days[0].occupiedCount").value(0));
+  hold(f,f.start);
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(jsonPath("$.days[0].status").value("OCCUPIED")).andExpect(jsonPath("$.days[0].occupiedCount").value(1));
+  hold(f,f.start.plusSeconds(3600));hold(f,f.start.plusSeconds(7200));
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(jsonPath("$.days[0].status").value("UNAVAILABLE")).andExpect(jsonPath("$.days[0].occupiedCount").value(3));
+  owner().update("UPDATE calendar_allocations SET expires_at=now()-interval '1 second' WHERE tenant_id=?",f.account.tenant);
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(jsonPath("$.days[0].status").value("FREE"));
+  String block="{\"start\":\""+f.date+"T09:00\",\"end\":\""+f.date+"T12:00\",\"reason\":\"Folga\"}";
+  mvc.perform(post("/api/v1/admin/calendar/blocks").with(user(f.account.id.toString())).with(csrf()).contentType("application/json").content(block)).andExpect(status().isCreated());
+  mvc.perform(get(path).with(user(f.account.id.toString()))).andExpect(jsonPath("$.days[0].status").value("UNAVAILABLE")).andExpect(jsonPath("$.days[0].occupiedCount").value(0));
+ }
  @Test void changingHoursAndHoldingAreSerialized()throws Exception{
   var f=fixture();java.util.concurrent.Callable<Integer> h=()->{try{hold(f,f.start);return 200;}catch(org.springframework.web.server.ResponseStatusException e){return e.getStatusCode().value();}};
   java.util.concurrent.Callable<Integer> close=()->mvc.perform(put("/api/v1/admin/availability").with(user(f.account.id.toString())).with(csrf()).contentType("application/json").content("{\"version\":1,\"schedule\":{\"weekly\":[],\"exceptions\":[]}}")).andReturn().getResponse().getStatus();

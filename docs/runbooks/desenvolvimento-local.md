@@ -74,3 +74,14 @@ Salve o expediente e abra “Confira como fica o seu dia” no fim da aba Horár
 # Bloqueios pontuais e alocações — atualização de 25/09/2026
 
 Na aba Horários, use “Bloquear um período específico”, informando início/fim no fuso exibido e motivo privado. Sobreposição com outro bloqueio/ocupação retorna conflito; confira a lista antes de repetir após falha de rede. “Liberar período” desativa preservando histórico. A prévia é recalculada após nova consulta e já considera os bloqueios. Não há endpoint público para reservas/HOLD. O núcleo expira ocupações temporárias antes de novas mutações, e leituras ignoram expiradas imediatamente. V011 aplicada localmente, API health UP, painel HTTP 200. Suíte completa: 79 testes, build e typecheck passaram (`calendar-verify.log`, `calendar-build.log`). Revisão visual/manual pendente; próxima etapa calendário diário/semanal.
+# Calendário administrativo — atualização de 28/09/2026
+
+Acesse `/painel/calendario`. Desktop abre na semana e celular no dia; use Dia/Semana, seletor, anterior/próxima e Hoje. Horários e datas seguem o fuso do perfil. Expediente exibido é a configuração atual, mesmo para datas passadas. Bloqueios que atravessam dias aparecem em cada dia afetado; ocupações temporárias são identificadas e não significam reservas confirmadas. Criar/liberar bloqueio atualiza a consulta, além da atualização automática a cada minuto. Consulta continua após bloqueio da assinatura; criação/liberação permanece restrita. Sem drag-and-drop.
+
+Sem nova migration (V011). Docker estava fechado na primeira tentativa de testes; após iniciar, a suíte completa passou: 27 unitários + 55 de integração = 82. Build e typecheck aprovados (`calendar-view-verify.log`, `calendar-view-build.log`). Backend health UP e rota frontend HTTP 200 em 28/09. Homologação visual/acessibilidade no navegador ainda pendente. Próxima entrega: critérios reais de publicação da página.
+
+### Atualização: calendário mensal e tema (28/09)
+Sem migration. Verify: 27 unitários + 56 integração = 83, sem falhas/ignorados (calendar-theme-verify.log). Build (calendar-theme-build.log) e typecheck aprovados. Tema claro/escuro e persistência após recarregar verificados no login; calendário autenticado ainda requer homologação visual. Reinicie a API para suportar days=42 e os indicadores. Preferência de tema é local ao navegador.
+
+### Publicação explícita (28/09)
+V011 mantida, sem migration. 86 testes (27 unitários + 59 integração), build e typecheck aprovados: publication-verify.log e publication-build.log. Reinício pelo script infra/local/start-api.ps1, log publication-local.log. Na aba Publicação, completar pendências e clicar Publicar página; Ver página pública abre o endereço local. Compartilhar na internet depende do deploy, ainda pendente. Não publica nenhuma conta automaticamente. Testes usam contas sintéticas em containers; homologação visual autenticada pendente.

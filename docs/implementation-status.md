@@ -1,6 +1,85 @@
 # Agendou - Status de implementação
 
-**Atualizado em:** 25/09/2026. Desenvolvimento na própria pasta do projeto.
+**Atualizado em:** 28/09/2026. Desenvolvimento na própria pasta do projeto.
+
+## Implementação em 28/09
+
+**Atualização após a revisão:** MVP-044 implementado nesta entrega. Nova aba `/painel/calendario`, consulta privada mensal/semanal/diária e integração de bloqueios; detalhes a seguir. Os itens da revisão inicial abaixo foram levantados antes desta implementação.
+
+### Ajuste em 28/09: endereço e localização do espaço
+
+- Minha página: campo Endereço do seu espaço para modalidade presencial/híbrida, orientação para endereço completo e link para conferir no Google Maps. Reutiliza location já persistido, sem migration ou API nova.
+- Página pública e prévia: seção Onde estamos com endereço, Ver no Google Maps e Como chegar. A seção não é renderizada na modalidade exclusivamente online. Links codificam o endereço e abrem em nova aba; nenhum mapa externo é carregado automaticamente.
+- Build (location-build.log) e typecheck aprovados. Sem nova execução da suíte backend; funcionamento do endereço real no provedor deve ser conferido pelo profissional antes de publicar.
+- Próxima tarefa mantida: Compartilhamento (MVP-036), seguido do fluxo serviço → data → horário → contato/revisão da reserva (MVP-050+).
+
+### Entrega em 28/09: publicação explícita da página (MVP-034/035)
+
+- Publicação liberada com perfil completo, assinatura operacional, serviço ativo, PIX/política ativos e ao menos um horário disponível para serviço ativo no horizonte de 60 dias. Inclui antecedência, duração, buffers, intervalo, exceções e ocupações reais.
+- GET calcula requisitos sob lock do tenant; POST revalida na transação antes de publicar. DELETE coordenado preserva dados e funciona após bloqueio da assinatura. Sem publicação automática.
+- Aba Publicação exibe pendências, informa os dados expostos, permite Publicar página, Ver página pública e Retirar página do ar. Perfil/serviços salvos são refletidos na página já publicada.
+- Apresentação comercial liberada; CTA de reserva permanece desabilitado até Booking. PIX e observações privadas não aparecem. Lotação posterior não retira automaticamente uma página já publicada.
+- OpenAPI 0.14.0 e ADR-0014, sem migration. Validação: 86 testes (27 unitários + 59 de integração), build e typecheck aprovados. Testes cobrem publicação explícita/repetida, retirada, isolamento, CSRF, requisitos alterados após a prévia, duração e bloqueios reais. Homologação visual autenticada desta tela permanece pendente.
+- Próxima tarefa: Compartilhamento (MVP-036), copiar link e preparar mensagem editável para abrir no WhatsApp. Depois, reservas de clientes MVP-050+.
+
+### Ajuste em 28/09: expediente por data específica
+
+- Seção em destaque no início de Horários: escolher uma data, copiar o expediente semanal para personalizar, editar várias faixas, marcar sem atendimento ou voltar ao padrão semanal. Edição usa as exceções já persistidas; não altera as demais datas do mesmo dia da semana. Precisa salvar para confirmar.
+- Calendário diário ganhou atalho com data preenchida para essa seção. Exemplo orienta duas faixas em 30/09; quantidade de horários disponíveis depende da duração do serviço, preparação e intervalo, conferida na prévia.
+- Usa API/versionamento e regras existentes, sem alteração de backend ou migration. Build e typecheck aprovados (specific-date-build.log); teste existente exceptionReplacesWeekAndEmptyExceptionClosesDay cobre substituição do expediente. Não houve nova execução da suíte backend ou homologação autenticada do editor nesta alteração.
+- Próxima tarefa: critérios reais de publicação e compartilhamento (MVP-034/035); depois fluxo de reservas de clientes MVP-050+.
+
+### Ajuste de tamanho em 28/09
+
+- Calendário mensal/semanal com largura máxima de 840px, células mensais mais baixas (86px) e semanais de 200px. Em telas menores, a grade se adapta à largura disponível e preserva as regras de celular. Alteração apenas de CSS, conferida no diff; sem nova execução da suíte funcional.
+- Próxima tarefa mantida: publicação e compartilhamento (MVP-034/035).
+
+### Ajuste em 28/09: calendário visual e aparência
+
+- Mês como visualização inicial, em grade de seis semanas; Semana mostra apenas sete dias. Dia mostra a lista de ocupações e bloqueios. Clicar em uma data abre a lista diária; navegação, Hoje e seletor de data mantidos.
+- Pontos: verde quando há horários disponíveis sem ocupações; amarelo quando há ocupações e disponibilidade restante; vermelho quando nenhum serviço ativo cabe no dia. Vermelho tem prioridade. Cálculo real inclui expediente, folgas, duração, buffers, intervalo, bloqueios, antecedência de 24h e horizonte de 60 dias. Sem serviço ativo também significa indisponível.
+- HOLDs vigentes são temporários, ainda não reservas confirmadas de clientes. Bloqueios pessoais não contam como atendimentos; expirados não afetam o indicador.
+- Botão de sol/lua na barra superior, disponível em todo o sistema, alterna claro/escuro. Preferência salva neste navegador, restaurada antes da pintura e sincronizada entre abas. Logomarca usa a variante adequada ao tema.
+- OpenAPI 0.13.0: consulta aceita 1, 7 ou 42 dias e retorna status/occupiedCount por dia. Sem migration.
+- Validação: 83 testes (27 unitários + 56 de integração), build e typecheck aprovados. Alternância e persistência do tema verificadas no navegador na tela de login. Revisão visual do calendário autenticado permanece pendente; nenhum login foi realizado nesta verificação.
+- Próxima tarefa: critérios reais de publicação e compartilhamento (MVP-034/035). Reservas de clientes e CTA de agendamento dependem de MVP-050+.
+
+### Entrega inicial em 28/09: calendário administrativo (MVP-044)
+
+- Aba Calendário no menu; semana (segunda a domingo) no desktop e dia no celular, alternância manual, navegação anterior/próxima, seletor de data, Hoje e atualização manual/periódica.
+- Expediente atual, folgas/exceções e ocupações persistidas por dia. Bloqueios e HOLDs recebem rótulos distintos; HOLD não é exibido como reserva confirmada. Preparação e faixas que atravessam datas são identificadas.
+- GET `/admin/calendar?from=YYYY-MM-DD&days=1|7`: membership/RLS, no-store, REPEATABLE READ e limites civis no fuso do perfil. Dias de 23/25 horas, faixas que começam antes do intervalo, limites semiabertos e expiração considerados.
+- Criação/liberação de bloqueios reutilizada no calendário, com atualização após mutação. Consulta preservada após bloqueio da assinatura; mutações seguem restritas. Respostas antigas de navegação descartadas.
+- Datas passadas mostram a configuração de expediente atual, não um histórico de versões; isso é explicado na interface. Não existem reservas ou clientes fictícios.
+- OpenAPI 0.12.0, ADR-0013, sem migration. Próxima tarefa: concluir os critérios reais de publicação (MVP-034/035); CTA de reserva depende de MVP-050+.
+
+### Revisão inicial de 28/09 — antes da implementação
+
+Revisão do código, rotas do painel, migrations, backlog e relatórios existentes. Esta revisão inicial foi documental; a implementação e a validação posteriores estão registradas acima e na tabela de validação. As seções de entregas anteriores abaixo registram o estado na data de cada entrega; suas pendências podem ter sido resolvidas posteriormente.
+
+| Área | Situação confirmada no código |
+|---|---|
+| Identidade e plataforma | Login, recuperação/verificação de email, assinatura e superadmin com MFA implementados |
+| Configuração do profissional | Perfil/logo, serviços e PIX/política implementados |
+| Horários | Configuração em lote ou individual, folgas/ausências, pausas e intervalo global entre atendimentos implementados |
+| Disponibilidade | Prévia por serviço/data com fuso, duração, buffers, antecedência e ocupações persistidas |
+| Bloqueios/alocação | Bloqueios pontuais e liberação no painel; núcleo HOLD interno, expiração e proteção GiST/locks implementados |
+| Calendário visual | **MVP-044 pendente:** não há rota nem seção semanal/diária no painel |
+| Publicação | Página/prévia prontas; `canPublish` permanece fixo em false e POST rejeita publicação. A mensagem de requisito ainda é genérica; atualizar junto da liberação real |
+| Reservas e operação | Booking, acesso do cliente, pagamento de reservas, cadastro de clientes e financeiro ainda pendentes; HOLD interno não equivale a reserva de cliente |
+
+Última validação completa registrada: **25/09/2026, 79 testes (27 unitários + 52 de integração), build e typecheck aprovados**. Relatórios Maven e log do build foram conferidos nesta revisão. Homologação de navegador/acessibilidade continua pendente.
+
+### Escopo executado: MVP-044 — calendário administrativo
+
+- Adicionar uma aba **Calendário**, mantendo **Horários** como área de configuração.
+- Visão semanal no desktop e lista diária no celular, com seleção de data, anterior/próximo e retorno a hoje, no fuso do profissional.
+- Exibir expediente, folgas/exceções e bloqueios reais; identificar ocupações temporárias vigentes sem apresentá-las como reservas confirmadas. Não inventar clientes ou compromissos.
+- Criar consulta autenticada por período, com RLS e leitura consistente. A lista atual de bloqueios mostra apenas ativos futuros/em andamento e não substitui uma consulta de calendário por intervalo. Incluir faixas que começam antes e atravessam o período consultado; tratar limites semiabertos e expiração.
+- Reutilizar criação/liberação de bloqueios e atualizar a visualização após essas ações. Consulta preservada após bloqueio de assinatura; mutações mantêm as restrições existentes.
+- Validar isolamento entre profissionais, fuso, bloqueios atravessando datas, expiração e leitura após bloqueio; verificar layout semanal/diário e acessibilidade. Sem drag-and-drop nesta etapa.
+
+Após essa entrega, seguir com publicação e compartilhamento conforme os critérios reais; CTA de reserva só será habilitado com o fluxo de Booking. MVP-045 permanece parcial até coordenar os estados de reservas confirmadas/reagendamento.
 
 ## Entrega mais recente em 25/09: alocações e bloqueios seguros (MVP-042/043, MVP-045 parcial)
 
@@ -124,17 +203,18 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 - Home escura/verde-água com a logomarca, slogan aprovado, FAQ e ilustração de agenda; login/cadastro/painel compartilham a identidade.
 - O usuário relatou em 23/09 ter testado login, sair e recuperação de senha com sucesso.
 
-## Validação desta entrega
+## Última validação de implementação — 28/09/2026
 
 | Check | Evidência |
 |---|---|
-| `mvnw.cmd verify` | PASS: 27 testes unitários + 52 de integração (79 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
+| `mvnw.cmd verify` | PASS: 27 testes unitários + 59 de integração (86 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
 | Migrations V001 a V011 | Aplicadas em bancos descartáveis, usando role real de runtime |
 | Atualização de banco existente | V003 → V011 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| Calendário | Grade de 42 dias, indicadores livre/ocupado/indisponível, expiração e bloqueios; consulta diária/semanal, faixa atravessando a data, exceções, RLS, leitura após bloqueio, HOLD expirado omitido, limites semiabertos e dias civis de 23/25h |
 | Alocações/bloqueios | Corridas HOLD/bloqueio e HOLD/expediente, GiST direto, limites adjacentes, intervalo, expiração, fuso protegido, RLS/CSRF, bloqueio de assinatura e liberação sem excluir histórico |
 | Gerador de horários | Grade/fuso, antecedência/horizonte, pausas, exceções, duração/buffers, intervalo, limites semiabertos e DST; consulta isolada, serviço inativo/externo negado |
 | Horários | Semana, pausas, dia fechado, validação de períodos/dias, RLS, CSRF, isolamento, conflito concorrente e bloqueio de trial com leitura preservada |
-| Página/publicação | Rascunhos/logo privados, projeção só com serviços ativos, isolamento entre tenants, RLS direta, entrada em centavos, no-store, requisitos, CSRF, bloqueio de publicação e retirada sem perda de dados |
+| Página/publicação | Publicação explícita, revalidação de requisitos, duração/bloqueios reais, retirada e projeção sem PIX; rascunhos/logo privados, projeção só com serviços ativos, isolamento entre tenants, RLS direta, entrada em centavos, no-store, requisitos, CSRF, bloqueio de publicação e retirada sem perda de dados |
 | PIX/política | Tipos/DV, normalização, confirmação obrigatória, versões antigas preservadas, auditoria sem chave, RLS/CSRF, permissões imutáveis, bloqueio pós-trial, noop e concorrência com um vencedor |
 | Catálogo de serviços | Cadastro/edição/inativação/reativação, entrada arredondada, limites na API/banco, JSON fracionário rejeitado, RLS, CSRF, bloqueio após trial e duas edições concorrentes com um único vencedor |
 | Perfil e logo | Rascunho/progresso, modalidade online/presencial, validação, compatibilidade, CSRF, isolamento entre profissionais, edição bloqueada, leitura preservada e imagem anterior mantida após erro |
@@ -149,7 +229,7 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 | Regressão de negócio | Cadastro, sessão, RLS, bloqueio do trial, reativação, recuperação e logout continuam cobertos |
 | `npm run typecheck` e `npm run build` | PASS |
 
-Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da suíte atual: `apps/api/calendar-verify.log`; build em `apps/web/calendar-build.log`. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador de bloqueios/prévia de horários/publicação/PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
+Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-reports`. Log da última suíte completa: `apps/api/calendar-view-verify.log`; build em `apps/web/calendar-view-build.log`. Suíte completa reexecutada após a implementação em 28/09. A tentativa inicial encontrou Docker fechado; após iniciá-lo, todos os testes passaram. PASS técnico não equivale à homologação de negócio. Frontend validado por tipagem/build; E2E de navegador de calendário/bloqueios/prévia de horários/publicação/PIX/catálogo/menu e revisão visual/acessibilidade ainda pendentes. A titular confirmou acesso real ao superadmin com MFA e testou o perfil/logo.
 
 ## Backlog: concluído e parcial
 
@@ -166,28 +246,28 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - **MVP-030/031:** perfil, contato, modalidade/local, progresso e upload/remoção de logo implementados. Exposição pública da variante saneada aguarda publicação da página.
 - **MVP-032:** catálogo administrativo funcional e testado; publicação, snapshots e reserva dependem das próximas etapas.
 - **MVP-033:** configuração PIX/política, validação local, auditoria e versões imutáveis concluídas. Referência/cópia por reserva entra no MVP-052, sem reescrever condições anteriores.
-- **MVP-034/035 (parciais):** página, prévia privada e bloqueio/requisitos de publicação implementados; liberação pública e CTA dependem de disponibilidade/reserva reais.
+- **MVP-034/035:** página, prévia, requisitos reais, publicação explícita e retirada implementados. CTA de reserva será integrado no MVP-050+.
 
 - **MVP-040:** configuração de expediente, pausas, exceções e bloqueios concluída.
 - **MVP-041:** gerador e prévia privada concluídos e integrados com alocações persistidas.
 - **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs; integração com Booking pendente.
+- **MVP-044:** calendário visual mensal/semanal e lista diária implementado em 28/09; consulta por período e criação/liberação de bloqueios integradas.
 
 ## Próximas implementações
 
-1. **Próxima entrega — calendário administrativo (MVP-044):** visão semanal desktop e lista diária mobile, com expediente e bloqueios reais, sem drag-and-drop ou compromissos fictícios. Ampliar com reservas quando Booking existir; concluir MVP-045 para esses estados no fluxo de reserva.
-2. **Concluir publicação (MVP-034/035):** substituir o bloqueio de disponibilidade pelo cálculo real, validar todos os requisitos no servidor e liberar publicação explícita. CTA só inicia reservas quando o fluxo estiver funcional; PIX nunca aparece na página geral.
-3. **Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático.
-4. **Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056).
-5. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
-6. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
+1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
+2. **Próxima entrega — Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático.
+3. **Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056); concluir MVP-045 para os estados de Booking e integrar reservas ao calendário.
+4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
+5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
 ### Onde entram as funções solicitadas pela responsável
 
 | Função | Situação / etapa |
 |---|---|
 | Acesso superadmin | Implementado e acesso com autenticador confirmado pela responsável |
-| Página com logomarca do profissional | Página e prévia em Publicação implementadas; liberação pública depende de disponibilidade real |
-| Calendário e disponibilidade | Configuração, prévia e alocações MVP-040 a 043 concluídas; calendário MVP-044 e integração futura de reservas em MVP-045 pendentes |
+| Página com logomarca do profissional | Página, prévia e publicação explícita com requisitos reais implementadas |
+| Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; integração futura de reservas em MVP-045 pendente |
 | Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
 | Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
 | Compartilhar link e mensagem no WhatsApp | MVP-036 explicitado no backlog; copiar/abrir mensagem, sem envio automático |
@@ -197,8 +277,8 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Banco local atualizado até V011 e API reiniciada na porta 8080 em 25/09; frontend na porta 3000, com resposta HTTP 200 em `/painel/horarios`, health da API UP e 404 para slug público inexistente. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
-- Agenda da home é ilustrativa. Página e prévia estão implementadas, mas publicação funcional, reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
+- Última verificação local em 28/09: banco permanece em V011, sem nova migration; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/painel/calendario`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, mas reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas terão idempotência própria em MVP-053.
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.
 - Recuperação de MFA é operacional/auditada; não há backup codes ou reset público. A chave DPAPI depende deste usuário Windows; produção exige gestão de segredos própria.
