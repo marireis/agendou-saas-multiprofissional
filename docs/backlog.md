@@ -58,7 +58,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [x] **MVP-033:** formulario PIX, recebedor, instrucoes/politica, validacao local e auditoria com versoes imutaveis (V008). Referencia/copia por reserva depende do MVP-052; nao existe confirmacao bancaria automatica.
 - [x] **MVP-034:** página `/a/{slug}`, perfil/logo, serviços ativos, preços/entrada e prévia privada. Publicação explícita disponível; CTA de reserva integrado futuramente no MVP-050.
 - [x] **MVP-035:** requisitos reais de perfil/assinatura/serviço/PIX/disponibilidade, publicação explícita com revalidação sob lock e retirada sem excluir dados. Nenhuma conta publicada automaticamente. ADR-0014.
-- [ ] **MVP-036:** aba Compartilhar com copiar link publico e mensagem editavel para abrir no WhatsApp; agenda precisa estar publicada, sem envio automatico ou integracao simulada.
+- [x] **MVP-036:** aba Compartilhar com copiar link público, convite editável, copiar mensagem e abrir WhatsApp. Exige página publicada, avisa sobre endereço local e oferece cópia manual se clipboard falhar. Sem envio automático.
 
 **Saida:** catalogo e pagina publica prontos para publicar apos disponibilidade.
 

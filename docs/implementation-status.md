@@ -6,6 +6,21 @@
 
 **Atualização após a revisão:** MVP-044 implementado nesta entrega. Nova aba `/painel/calendario`, consulta privada mensal/semanal/diária e integração de bloqueios; detalhes a seguir. Os itens da revisão inicial abaixo foram levantados antes desta implementação.
 
+### Ajuste em 28/09: botões de contato
+
+- Vamos conversar? usa botões com ícones e texto: Enviar email abre mailto; Conversar no WhatsApp abre wa.me para o telefone comercial. Disponíveis também na prévia; sem envio automático.
+- Números brasileiros com DDD recebem código 55 quando ausente; internacionais exigem + e código do país. Telefone fora desses formatos mantém alternativa de ligação. Perfil orienta informar número cadastrado no WhatsApp; não há consulta de existência da conta.
+- Build (contact-buttons-build.log) e typecheck aprovados. Não foram abertas conversas reais nem enviados emails. Sem alterações de backend; próxima tarefa continua sendo reservas de clientes MVP-050+.
+
+### Entrega em 28/09: compartilhamento (MVP-036)
+
+- Nova aba Compartilhar e atalho em Publicação, rota /painel/compartilhar. Consulta o estado real de publicação, bloqueia ações de compartilhamento para rascunhos e reconsulta ao voltar à janela; erro de consulta impede compartilhar.
+- Link completo formado com a origem atual e o caminho retornado pelo servidor. Copiar link, abrir página, convite editável, restaurar sugestão e copiar mensagem. Falha da área de transferência seleciona o texto para cópia manual.
+- Abrir no WhatsApp usa wa.me com texto codificado; o profissional escolhe o destinatário e confirma o envio. Nenhuma mensagem foi enviada nesta implementação. Sugestão apresenta serviços/contatos, sem prometer reservas online ainda indisponíveis. Rascunho do convite fica somente nesta tela.
+- Aviso para localhost/loopback: link local não é acessível aos clientes em outros dispositivos. Compartilhamento externo depende da hospedagem pública.
+- Build (sharing-build.log) e typecheck aprovados, incluindo a nova rota. Sem migration, endpoint novo ou alteração de backend. Homologação autenticada de clipboard/abertura do aplicativo WhatsApp permanece pendente; não foi executada a suíte backend nesta alteração.
+- Próxima entrega: reservas de clientes MVP-050 a 056, começando pelo fluxo serviço → data → horário → contato/verificação → revisão, com consulta pública segura e integração às alocações existentes.
+
 ### Ajuste em 28/09: endereço e localização do espaço
 
 - Minha página: campo Endereço do seu espaço para modalidade presencial/híbrida, orientação para endereço completo e link para conferir no Google Maps. Reutiliza location já persistido, sem migration ou API nova.
@@ -256,8 +271,8 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 ## Próximas implementações
 
 1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
-2. **Próxima entrega — Compartilhamento (MVP-036):** copiar link e mensagem editável para abrir no WhatsApp depois da publicação funcional; sem envio automático.
-3. **Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056); concluir MVP-045 para os estados de Booking e integrar reservas ao calendário.
+2. **Concluído — Compartilhamento (MVP-036):** aba com copiar link/mensagem, convite editável e abertura no WhatsApp, condicionada à publicação.
+3. **Próxima entrega — Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056); concluir MVP-045 para os estados de Booking e integrar reservas ao calendário.
 4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
 5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
@@ -270,7 +285,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 | Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; integração futura de reservas em MVP-045 pendente |
 | Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
 | Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
-| Compartilhar link e mensagem no WhatsApp | MVP-036 explicitado no backlog; copiar/abrir mensagem, sem envio automático |
+| Compartilhar link e mensagem no WhatsApp | MVP-036 implementado; copiar link/mensagem e abrir WhatsApp, sem envio automático |
 
 ## Limitações e execução
 
