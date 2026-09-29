@@ -2,6 +2,15 @@
 
 **Atualizado em:** 29/09/2026. Desenvolvimento na própria pasta do projeto.
 
+## Entrega em 29/09: base PIX manual e prévia de pagamento (MVP-060/061)
+
+- V016 cria intenções de pagamento e estruturas de recebimentos, comprovantes e devoluções com FORCE RLS/FKs compostas. Uma intenção por reserva, criada na mesma transação e preservada na repetição idempotente. Reservas anteriores recebem intenção com os valores/prazos originais; expiração atualiza reserva e intenção juntas.
+- Interface PaymentProvider com implementação ManualPixProvider. Consulta privada exige sessão de cliente e propriedade da reserva, usa snapshot PIX original e responde sem cache. Expiradas omitem chave/recebedor/instruções; consulta permanece após retirada da página/bloqueio da assinatura.
+- Recibo e detalhe de Meus agendamentos exibem total, entrada, saldo projetado após entrada, recebedor, chave para copiar, instruções e prazo. Dados abertos sob clique explícito, atualização periódica e ocultação na expiração. Falha de clipboard oferece seleção manual.
+- **Limite operacional:** tela em modo prévia, com paymentAvailable=false e orientação para não transferir nesta etapa. Não há upload, validação bancária, confirmação de recebimento/atendimento ou devolução operacional. Estruturas futuras de recebimento/comprovante/devolução não têm permissão de escrita para o runtime ainda. Conferência será integrada nas próximas etapas.
+- OpenAPI 0.18.0 e ADR-0019. V016 aplicada localmente com dados preservados e backend health UP (pix-foundation-local.log). Validação: 27 unitários e 27 integrações (PublicPageJourneyIT/PaymentSettingsJourneyIT) aprovados em pix-foundation-verify.log; build e typecheck aprovados (pix-foundation-build.log). Testes incluem preservação de chave/valores, propriedade, expiração, RLS, idempotência e rollback da intenção. Homologação visual autenticada/cópia ainda pendente; nenhuma transferência realizada.
+- **Próxima tarefa: MVP-062/063 — envio privado de comprovantes e estado EmConferencia**, com validação de arquivos e armazenamento privado. Depois conferência/validação manual MVP-064/065. Upload nunca confirma pagamento automaticamente. Troca de email por nome/sobrenome/telefone permanece adiada.
+
 ## Entrega em 29/09: expiração coordenada (MVP-056)
 
 - Worker seleciona somente tenants com reservas vencidas; até 20 lotes por ciclo e 100 reservas por transação. Coordenação persistida no PostgreSQL, com token exclusivo e lease de dois minutos; execução antiga não pode finalizar trabalho assumido por outra instância.
@@ -320,7 +329,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 
 1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
 2. **Concluído — Compartilhamento (MVP-036):** aba com copiar link/mensagem, convite editável e abertura no WhatsApp, condicionada à publicação.
-3. **Próxima entrega — PIX manual (MVP-060/061):** base de pagamentos e tela com total, entrada, saldo, recebedor, chave e prazo. MVP-052/053/055/056 concluídos no escopo atual. Mecanismo MVP-054 implementado, números comerciais pendentes. Pedido adiado: trocar email por nome, sobrenome e telefone na jornada do cliente, com verificação e migração próprias.
+3. **Próxima entrega — comprovantes (MVP-062/063):** upload privado, validação e estado EmConferencia; depois conferência manual MVP-064/065. Base MVP-060 e tela MVP-061 implementadas em modo prévia, sem liberação operacional de pagamento. Mecanismo MVP-054 implementado, números comerciais pendentes. Pedido adiado: trocar email por nome, sobrenome e telefone, com verificação e migração próprias.
 4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
 5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
@@ -340,7 +349,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Última verificação local em 29/09: migração V015 aplicada sobre V014 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/entrar`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Última verificação local em 29/09: migração V016 aplicada sobre V015 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/entrar`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
 - Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, com reservas temporárias. Comprovantes, financeiro do profissional, aba Clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas temporárias já usam chave idempotente própria (MVP-053).
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.

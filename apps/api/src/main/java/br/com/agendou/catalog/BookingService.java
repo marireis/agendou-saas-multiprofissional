@@ -16,8 +16,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class BookingService {
- private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;
- public BookingService(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock){this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;}
+ private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;private final PaymentProvider payments;
+ public BookingService(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock,PaymentProvider payments){this.payments=payments;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;}
  record Quote(String service,String pix,int paymentVersion,long price,long deposit,String timezone,String fingerprint){}
  private Quote currentQuote(UUID id)throws Exception{
   var rows=jdbc.query("""
@@ -61,6 +61,7 @@ public class BookingService {
     INSERT INTO bookings(id,tenant_id,customer_id,service_id,allocation_id,status,starts_at,ends_at,expires_at,timezone,service_snapshot,pix_snapshot,price_cents,deposit_cents,payment_version)
     VALUES (?,?,?,?,?,'AWAITING_PAYMENT',?,?,?,?,?::jsonb,?::jsonb,?,?,?)
     """,booking,tenant,customer,actor.serviceId(),allocation,Timestamp.from(actor.start()),Timestamp.from(end),Timestamp.from(expires),quote.timezone(),quote.service(),quote.pix(),quote.price(),quote.deposit(),quote.paymentVersion());
+   jdbc.update("INSERT INTO payment_intents(id,tenant_id,booking_id,provider,status,amount_due_cents,deadline_at) VALUES (?,?,?,'MANUAL_PIX','AWAITING_PAYMENT',?,?)",UUID.randomUUID(),tenant,booking,quote.deposit(),Timestamp.from(expires));
    jdbc.update("INSERT INTO booking_usage(tenant_id,booking_id,month,state) VALUES (?,?,?,'HELD')",tenant,booking,java.sql.Date.valueOf(month));
    jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'REQUESTED')",UUID.randomUUID(),tenant,booking);
    var response=receipt(booking,actor.email());
@@ -88,6 +89,9 @@ public class BookingService {
    return result;
   }finally{TenantContext.clear();}
  }
+ @Transactional public Map<String,Object> paymentForCustomer(String slug,String email,UUID id){
+  try{bind(slug,email);expireCurrent();receipt(id,email);return payments.view(id);}finally{TenantContext.clear();}
+ }
  private Map<String,Object> receipt(UUID id,String email){
   var rows=jdbc.query("""
    SELECT b.id,b.status,b.starts_at,b.ends_at,b.expires_at,b.timezone,b.price_cents,b.deposit_cents,b.service_snapshot->>'name'
@@ -102,7 +106,7 @@ public class BookingService {
  }
  public int expireCurrent(int limit){
   var tenant=TenantContext.require();var now=Timestamp.from(clock.instant());var expired=jdbc.query("UPDATE bookings SET status='EXPIRED' WHERE tenant_id=? AND id IN (SELECT id FROM bookings WHERE tenant_id=? AND status='AWAITING_PAYMENT' AND expires_at<=? ORDER BY expires_at,id LIMIT ?) RETURNING id,allocation_id",(r,n)->new UUID[]{r.getObject(1,UUID.class),r.getObject(2,UUID.class)},tenant,tenant,now,limit);
-  for(var row:expired){jdbc.update("UPDATE calendar_allocations SET active=false,released_at=coalesce(released_at,?) WHERE tenant_id=? AND id=?",now,tenant,row[1]);jdbc.update("UPDATE booking_usage SET state='RELEASED' WHERE tenant_id=? AND booking_id=? AND state='HELD'",tenant,row[0]);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'EXPIRED')",UUID.randomUUID(),tenant,row[0]);}
+  for(var row:expired){jdbc.update("UPDATE payment_intents SET status='EXPIRED' WHERE tenant_id=? AND booking_id=? AND status='AWAITING_PAYMENT'",tenant,row[0]);jdbc.update("UPDATE calendar_allocations SET active=false,released_at=coalesce(released_at,?) WHERE tenant_id=? AND id=?",now,tenant,row[1]);jdbc.update("UPDATE booking_usage SET state='RELEASED' WHERE tenant_id=? AND booking_id=? AND state='HELD'",tenant,row[0]);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'EXPIRED')",UUID.randomUUID(),tenant,row[0]);}
   return expired.size();
  }
  @Transactional public void expireTenant(UUID tenant){TenantContext.set(tenant);try{tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);expireCurrent();}finally{TenantContext.clear();}}

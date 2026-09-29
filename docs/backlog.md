@@ -94,8 +94,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** completar reserva, pagamento, conferencia e atendimento.
 
-- [ ] **MVP-060:** criar PaymentIntent, PaymentTransaction, PaymentEvidence, Refund e interface `PaymentProvider` manual.
-- [ ] **MVP-061:** tela de pagamento com total, entrada, saldo, recebedor, chave PIX, copiar chave e prazo.
+- [x] **MVP-060 (base):** PaymentIntent transacional, estruturas PaymentTransaction/PaymentEvidence/Refund e PaymentProvider manual. V016/ADR-0019; operações de recebimento/comprovante/devolução dependem de MVP-062+.
+- [x] **MVP-061 (interface):** prévia privada com total, entrada, saldo projetado, recebedor, chave PIX, copiar chave e prazo. Pagamento operacional permanece desabilitado até integração de comprovantes/conferência.
 - [ ] **MVP-062:** receber JPEG, PNG ou PDF ate 5 MB, validar conteudo e armazenar em area privada.
 - [ ] **MVP-063:** mover para `EmConferencia` apos comprovante no prazo, sem estender prazo por reenvio.
 - [ ] **MVP-064:** painel de conferencia com valor recebido, conta, referencia bancaria unica e data.

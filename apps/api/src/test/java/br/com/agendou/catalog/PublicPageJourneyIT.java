@@ -26,6 +26,26 @@ class PublicPageJourneyIT {
  @org.springframework.boot.test.mock.mockito.MockBean org.springframework.mail.javamail.JavaMailSender sender;
  @Autowired br.com.agendou.identity.MailDeliveryService delivery;
  @Autowired BookingService bookings;
+ @Test void manualPixUsesBookingSnapshotAndExpiresWithoutExposingKey()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);var key=UUID.randomUUID();
+  var response=reserve(a,c,key).andExpect(status().isCreated()).andReturn();String id=json.readTree(response.getResponse().getContentAsString()).get("id").asText();
+  reserve(a,c,key).andExpect(status().isCreated());
+  assertThat(owner().queryForObject("SELECT count(*) FROM payment_intents WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+  owner().update("UPDATE payment_settings_versions SET pix_key='changed@example.test',recipient_name='Alterado' WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE services SET price_cents=20000 WHERE tenant_id=?",a.tenant);
+  String path="/api/v1/public/"+a.slug+"/client/bookings/"+id+"/payment";
+  mvc.perform(get(path)).andExpect(status().isUnauthorized());
+  mvc.perform(get(path).cookie(c.cookie)).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.pixKey").value("private@example.test")).andExpect(jsonPath("$.recipientName").value("Recebedor teste")).andExpect(jsonPath("$.totalCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.remainingAfterDepositCents").value(5000)).andExpect(jsonPath("$.paymentAvailable").value(false));
+  var other=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());reserve(a,other,UUID.randomUUID()).andExpect(status().isCreated());
+  mvc.perform(get(path).cookie(other.cookie)).andExpect(status().isNotFound());
+  owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path).cookie(c.cookie)).andExpect(status().isOk());
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",UUID.fromString(id));
+  mvc.perform(get(path).cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("EXPIRED")).andExpect(jsonPath("$.pixKey").doesNotExist()).andExpect(jsonPath("$.instructions").doesNotExist());
+  assertThat(owner().queryForObject("SELECT status FROM payment_intents WHERE booking_id=?",String.class,UUID.fromString(id))).isEqualTo("EXPIRED");
+  assertThat(runtime.queryForObject("SELECT count(*) FROM payment_intents",Long.class)).isZero();
+  for(String table:List.of("payment_transactions","payment_evidence","payment_refunds"))assertThat(runtime.queryForObject("SELECT count(*) FROM "+table,Long.class)).isZero();
+ }
  @Autowired BookingExpirationJobs expirationJobs;
  BookingExpirationJobs.Claim claimFor(Account a){
   for(int i=0;i<100;i++){var claim=expirationJobs.claim().orElseThrow();if(claim.tenant().equals(a.tenant))return claim;expirationJobs.process(claim);}
@@ -137,7 +157,7 @@ class PublicPageJourneyIT {
   assertThat(body).doesNotContain("pixKey","private@example.test");
   reserve(a,c,key).andExpect(status().isCreated()).andExpect(content().json(body));
   reserve(a,c,UUID.randomUUID()).andExpect(status().isConflict());
-  for(var table:List.of("bookings","customers","booking_usage","booking_requests","calendar_allocations"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+  for(var table:List.of("bookings","customers","booking_usage","booking_requests","payment_intents","calendar_allocations"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
   assertThat(owner().queryForObject("SELECT count(*) FROM mail_outbox WHERE booking_id=?",Long.class,id)).isEqualTo(1);
   assertThat(runtime.queryForObject("SELECT count(*) FROM bookings",Long.class)).isZero();
   mvc.perform(get("/api/v1/admin/calendar").with(user(a.id.toString())).param("from",java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString()).param("days","1")).andExpect(status().isOk()).andExpect(jsonPath("$.events[0].bookingId").value(id.toString())).andExpect(jsonPath("$.events[0].serviceName").value("Consulta"));
@@ -154,7 +174,7 @@ class PublicPageJourneyIT {
   var a=account();var start=publishAndFindStart(a);var c=client(a,start);
   owner().execute("ALTER TABLE mail_outbox ADD CONSTRAINT test_reject_booking_notice CHECK(booking_id IS NULL) NOT VALID");
   try{reserve(a,c,UUID.randomUUID()).andExpect(status().isConflict());
-   for(var table:List.of("bookings","customers","booking_usage","booking_requests","calendar_allocations","booking_events"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+   for(var table:List.of("bookings","customers","booking_usage","booking_requests","payment_intents","calendar_allocations","booking_events"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isZero();
   }finally{owner().execute("ALTER TABLE mail_outbox DROP CONSTRAINT test_reject_booking_notice");}
  }
  @Test void quoteChangeCsrfAndPublicationPreventUnintendedBooking()throws Exception{

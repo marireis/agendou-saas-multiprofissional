@@ -152,3 +152,5 @@ As próximas migrations devem continuar a numeração existente, sem reutilizar 
 - V014: customer_portal_tokens (hash, tenant/email únicos, prazo), FORCE RLS e índice de expiração; índice de reservas por cliente/data. Outbox CUSTOMER_PORTAL e funções de vigência/limpeza ampliadas. Sessão privada com slug/email e validade absoluta de uma hora (ADR-0017).
 
 - V015: booking_expiration_jobs por tenant, com token/validade de lease, próxima tentativa e contador de falhas. RLS sem acesso direto do runtime; funções mínimas de claim/validação/finalização e trigger para novos tenants. Retorna somente coordenadas de trabalho. ADR-0018.
+
+- V016: payment_intents (um por tenant/reserva, entrada/prazo imutáveis, AWAITING_PAYMENT/EXPIRED), payment_transactions (referência bancária única por tenant), payment_evidence (objeto privado/hash/tipo/tamanho) e payment_refunds (registro auditável de devolução). FORCE RLS e FKs compostas. Runtime escreve apenas intenção/estado; operações das demais tabelas pendentes de MVP-062+. Backfill de reservas anteriores sem renovar prazo. ADR-0019.

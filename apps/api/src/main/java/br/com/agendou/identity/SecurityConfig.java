@@ -26,6 +26,7 @@ public class SecurityConfig {
     .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/availability","/api/v1/public/*/review").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/bookings/*").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/client/bookings","/api/v1/public/*/client/bookings/*").permitAll()
+    .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/client/bookings/*/payment").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/client/access-links","/api/v1/public/*/client/access-links/consume","/api/v1/public/*/client/logout").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/bookings").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/access-links","/api/v1/public/*/access-links/consume").permitAll()

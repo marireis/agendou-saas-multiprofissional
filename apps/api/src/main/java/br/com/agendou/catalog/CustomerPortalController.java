@@ -82,6 +82,10 @@ public class CustomerPortalController {
   var access=verified(slug,request);
   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(bookings.detailForCustomer(slug,access.email(),id));
  }
+ @GetMapping("/bookings/{id}/payment") public ResponseEntity<?> payment(@PathVariable String slug,@PathVariable UUID id,HttpServletRequest request){
+  var access=verified(slug,request);
+  return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(bookings.paymentForCustomer(slug,access.email(),id));
+ }
  @PostMapping("/logout") public ResponseEntity<?> logout(@PathVariable String slug,HttpServletRequest request){
   var session=request.getSession(false);
   if(session!=null){session.removeAttribute("customerPortal");session.removeAttribute("customerReview");session.removeAttribute("customerBookingReceipt");}

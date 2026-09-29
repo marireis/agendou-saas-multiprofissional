@@ -1,13 +1,44 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.17.0
+  version: 0.18.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /public/{slug}/client/bookings/{id}/payment:
+    get:
+      summary: Prévia privada do PIX preservado na reserva
+      description: Exige sessão de cliente verificado e propriedade da reserva. Não confirma recebimento nem permite transferência automática. paymentAvailable=false até integrar comprovantes/conferência. Sem cache. Consulta preservada após retirada da página ou bloqueio da assinatura.
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Valores em centavos calculados no servidor; chave/recebedor/instruções omitidos após expiração
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, provider, status, totalCents, depositCents, remainingAfterDepositCents, deadline, timezone, paymentAvailable]
+                properties:
+                  id: {type: string, format: uuid}
+                  provider: {type: string, const: MANUAL_PIX}
+                  status: {type: string, enum: [AWAITING_PAYMENT, EXPIRED]}
+                  totalCents: {type: integer}
+                  depositCents: {type: integer}
+                  remainingAfterDepositCents: {type: integer, description: Saldo projetado depois de pagar a entrada; não representa recebimento confirmado}
+                  deadline: {type: string, format: date-time}
+                  timezone: {type: string}
+                  paymentAvailable: {type: boolean, const: false}
+                  keyType: {type: string}
+                  pixKey: {type: string}
+                  recipientName: {type: string}
+                  instructions: {type: string}
+        '401': {description: Sessão de cliente ausente ou expirada}
+        '404': {description: Reserva/intenção inexistente ou de outro cliente}
   /public/{slug}/client/access-links:
     post:
       security: []
