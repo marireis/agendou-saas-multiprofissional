@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
-@SpringBootTest(properties={"agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000"})
+@SpringBootTest(properties={"agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000","agendou.booking-expiration-delay=3600000"})
 @AutoConfigureMockMvc @Testcontainers
 class PublicPageJourneyIT {
  @Container static PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:17").withUsername("agendou_app").withPassword("agendou_app");
@@ -26,6 +26,62 @@ class PublicPageJourneyIT {
  @org.springframework.boot.test.mock.mockito.MockBean org.springframework.mail.javamail.JavaMailSender sender;
  @Autowired br.com.agendou.identity.MailDeliveryService delivery;
  @Autowired BookingService bookings;
+ @Autowired BookingExpirationJobs expirationJobs;
+ BookingExpirationJobs.Claim claimFor(Account a){
+  for(int i=0;i<100;i++){var claim=expirationJobs.claim().orElseThrow();if(claim.tenant().equals(a.tenant))return claim;expirationJobs.process(claim);}
+  throw new AssertionError("Tenant não selecionado");
+ }
+ @Test void expirationLeaseCanBeRecoveredAndStaleWorkerCannotFinishNewLease()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));reserve(a,c,UUID.randomUUID()).andExpect(status().isCreated());
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+  var first=claimFor(a);
+  assertThat(owner().queryForObject("SELECT lease_token FROM booking_expiration_jobs WHERE tenant_id=?",UUID.class,a.tenant)).isEqualTo(first.token());
+  var another=expirationJobs.claim();assertThat(another.map(value->value.tenant().equals(a.tenant)).orElse(false)).isFalse();another.ifPresent(expirationJobs::process);
+  owner().update("UPDATE booking_expiration_jobs SET leased_until=now()-interval '1 second' WHERE tenant_id=?",a.tenant);
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);var gate=new java.util.concurrent.CountDownLatch(1);
+  BookingExpirationJobs.Claim replacement;
+  try{
+   var futures=java.util.stream.IntStream.range(0,2).mapToObj(i->pool.submit(()->{gate.await();return expirationJobs.claim();})).toList();gate.countDown();
+   var claimed=new ArrayList<BookingExpirationJobs.Claim>();for(var future:futures)future.get().ifPresent(claimed::add);
+   var matches=claimed.stream().filter(value->value.tenant().equals(a.tenant)).toList();assertThat(matches).hasSize(1);replacement=matches.getFirst();
+   claimed.stream().filter(value->!value.tenant().equals(a.tenant)).forEach(expirationJobs::process);
+  }finally{pool.shutdownNow();}
+  assertThat(replacement.token()).isNotEqualTo(first.token());
+  expirationJobs.failed(first);assertThat(expirationJobs.process(first)).isZero();
+  assertThat(owner().queryForObject("SELECT lease_token FROM booking_expiration_jobs WHERE tenant_id=?",UUID.class,a.tenant)).isEqualTo(replacement.token());
+  assertThat(expirationJobs.process(replacement)).isEqualTo(1);assertThat(expirationJobs.process(replacement)).isZero();
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_events WHERE tenant_id=? AND event_type='EXPIRED'",Long.class,a.tenant)).isEqualTo(1);
+ }
+ @Test void expirationFailureRollsBackAndBackoffAllowsRetry()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));reserve(a,c,UUID.randomUUID()).andExpect(status().isCreated());
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);var claim=claimFor(a);
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_reject_expiry CHECK(event_type<>'EXPIRED') NOT VALID");
+  try{assertThatThrownBy(()->expirationJobs.process(claim)).isInstanceOf(org.springframework.dao.DataAccessException.class);}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_reject_expiry");}
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE tenant_id=?",String.class,a.tenant)).isEqualTo("AWAITING_PAYMENT");
+  assertThat(owner().queryForObject("SELECT active FROM calendar_allocations WHERE tenant_id=?",Boolean.class,a.tenant)).isTrue();
+  assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE tenant_id=?",String.class,a.tenant)).isEqualTo("HELD");
+  expirationJobs.failed(claim);
+  assertThat(owner().queryForObject("SELECT failures FROM booking_expiration_jobs WHERE tenant_id=?",Integer.class,a.tenant)).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT next_attempt_at>now() AND lease_token IS NULL FROM booking_expiration_jobs WHERE tenant_id=?",Boolean.class,a.tenant)).isTrue();
+  owner().update("UPDATE booking_expiration_jobs SET next_attempt_at=now()-interval '1 second' WHERE tenant_id=?",a.tenant);
+  assertThat(expirationJobs.process(claimFor(a))).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT failures FROM booking_expiration_jobs WHERE tenant_id=?",Integer.class,a.tenant)).isZero();
+ }
+ @Test void expirationProcessesBoundedBatchesAndKeepsFutureReservations()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));reserve(a,c,UUID.randomUUID()).andExpect(status().isCreated());
+  UUID original=owner().queryForObject("SELECT id FROM bookings WHERE tenant_id=?",UUID.class,a.tenant);
+  for(int i=0;i<101;i++){
+   UUID allocation=UUID.randomUUID(),booking=UUID.randomUUID();
+   owner().update("INSERT INTO calendar_allocations(id,tenant_id,resource_id,kind,service_id,starts_at,ends_at,buffer_before,buffer_after,protected_start,protected_end,active,expires_at,reason) SELECT ?,tenant_id,resource_id,kind,service_id,starts_at,ends_at,buffer_before,buffer_after,protected_start,protected_end,false,expires_at,reason FROM calendar_allocations WHERE id=(SELECT allocation_id FROM bookings WHERE id=?)",allocation,original);
+   owner().update("INSERT INTO bookings(id,tenant_id,customer_id,service_id,allocation_id,status,starts_at,ends_at,expires_at,timezone,service_snapshot,pix_snapshot,price_cents,deposit_cents,payment_version) SELECT ?,tenant_id,customer_id,service_id,?,'AWAITING_PAYMENT',starts_at,ends_at,now()-interval '1 minute',timezone,service_snapshot,pix_snapshot,price_cents,deposit_cents,payment_version FROM bookings WHERE id=?",booking,allocation,original);
+   owner().update("INSERT INTO booking_usage(tenant_id,booking_id,month,state) SELECT tenant_id,?,month,'HELD' FROM booking_usage WHERE booking_id=?",booking,original);
+  }
+  assertThat(expirationJobs.process(claimFor(a))).isEqualTo(100);
+  assertThat(expirationJobs.process(claimFor(a))).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT count(*) FROM bookings WHERE tenant_id=? AND status='EXPIRED'",Long.class,a.tenant)).isEqualTo(101);
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE id=?",String.class,original)).isEqualTo("AWAITING_PAYMENT");
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_usage WHERE tenant_id=? AND state='RELEASED'",Long.class,a.tenant)).isEqualTo(101);
+ }
  record Client(jakarta.servlet.http.Cookie cookie,String quote){}
  String portalEmail(Account a){return owner().queryForObject("SELECT email FROM customers WHERE tenant_id=? LIMIT 1",String.class,a.tenant);}
  String portalToken(Account a){String body=owner().queryForObject("SELECT body FROM mail_outbox WHERE purpose='CUSTOMER_PORTAL' AND token_hash IN (SELECT token_hash FROM customer_portal_tokens WHERE tenant_id=?)",String.class,a.tenant);return body.split("#token=")[1].split("&email=")[0];}

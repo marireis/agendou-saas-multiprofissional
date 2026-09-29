@@ -1,5 +1,7 @@
 # Agendou - Contrato de API inicial
 
+Meus agendamentos (29/09, OpenAPI 0.17.0): sob `/public/{slug}/client`, POST `/access-links` recebe email e retorna 202 genérico; POST `/access-links/consume` recebe email/token e abre sessão restrita por uma hora. GET `/bookings?offset=0` retorna items (até 20), hasMore, offset e email; GET `/bookings/{id}` adiciona modalidade/local, política aceita e eventos ao recibo, sem PIX. POST `/logout` remove acessos de cliente/revisão, preservando eventual login administrativo. Mutações exigem CSRF; consultas exigem cliente verificado e propriedade. Funciona após bloqueio/retirada da página. Rotas `/client/bookings` sem slug do planejamento abaixo foram concretizadas com esse escopo explícito. ADR-0017. Mudança futura para nome/sobrenome/telefone solicitada e adiada em 29/09; não altera este contrato ainda.
+
 Todas as rotas abaixo ficam sob `/api/v1`. Erros retornam `code`, `message`, `correlation_id` e, quando seguro, `field_errors`.
 
 ## 1. Convencoes

@@ -84,8 +84,9 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 - [x] **MVP-052:** reserva temporária, snapshots, alocação, quota provisória e outbox na mesma transação (V013, ADR-0016).
 - [x] **MVP-053:** idempotência por tenant/ator/operação e hash da seleção/revisão; repetição devolve recibo original, conteúdo divergente retorna 409.
 - [ ] **MVP-054 (mecanismo implementado):** quota mensal/provisória pelo plano vigente, liberada na expiração. Falta definir números comerciais (atualmente null = ilimitado); futura conferência não deve bloquear recebimento por limite.
-- [ ] **MVP-055:** criar area `Meus agendamentos` com detalhe, estado e prazo de expiracao.
-- [ ] **MVP-056 (parcial):** expiração síncrona e worker básico implementados, liberando alocação/quota. Faltam lotes/leases e integração dos futuros estados de pagamento.
+- [x] **MVP-055:** Meus agendamentos com lista paginada, detalhe, histórico e prazo; link único de email/sessão restrita. Consulta preservada após retirada da página/bloqueio de assinatura (V014/ADR-0017).
+- [ ] **Ajuste posterior solicitado em 29/09:** usar nome, sobrenome e telefone, sem exigir email, para agendar e acessar reservas. Definir verificação pelo telefone, migração e recuperação. Adiado explicitamente pela responsável; fluxo atual mantido.
+- [x] **MVP-056:** expiração síncrona e worker em lotes com lease/token, recuperação e retries; liberação transacional de alocação/quota e evento único. V015/ADR-0018. Futuros estados de pagamento serão integrados em MVP-060+.
 
 **Saida:** cliente recebe reserva `AguardandoPagamento`, horario bloqueado temporariamente e consulta segura.
 

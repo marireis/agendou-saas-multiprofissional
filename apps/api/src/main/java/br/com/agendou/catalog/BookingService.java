@@ -98,8 +98,12 @@ public class BookingService {
  }
  // Caller holds the tenant lock. Expiration preserves all snapshots, events and idempotency receipts.
  public void expireCurrent(){
-  var tenant=TenantContext.require();var now=Timestamp.from(clock.instant());var expired=jdbc.query("UPDATE bookings SET status='EXPIRED' WHERE tenant_id=? AND status='AWAITING_PAYMENT' AND expires_at<=? RETURNING id,allocation_id",(r,n)->new UUID[]{r.getObject(1,UUID.class),r.getObject(2,UUID.class)},tenant,now);
+  expireCurrent(Integer.MAX_VALUE);
+ }
+ public int expireCurrent(int limit){
+  var tenant=TenantContext.require();var now=Timestamp.from(clock.instant());var expired=jdbc.query("UPDATE bookings SET status='EXPIRED' WHERE tenant_id=? AND id IN (SELECT id FROM bookings WHERE tenant_id=? AND status='AWAITING_PAYMENT' AND expires_at<=? ORDER BY expires_at,id LIMIT ?) RETURNING id,allocation_id",(r,n)->new UUID[]{r.getObject(1,UUID.class),r.getObject(2,UUID.class)},tenant,tenant,now,limit);
   for(var row:expired){jdbc.update("UPDATE calendar_allocations SET active=false,released_at=coalesce(released_at,?) WHERE tenant_id=? AND id=?",now,tenant,row[1]);jdbc.update("UPDATE booking_usage SET state='RELEASED' WHERE tenant_id=? AND booking_id=? AND state='HELD'",tenant,row[0]);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'EXPIRED')",UUID.randomUUID(),tenant,row[0]);}
+  return expired.size();
  }
  @Transactional public void expireTenant(UUID tenant){TenantContext.set(tenant);try{tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);expireCurrent();}finally{TenantContext.clear();}}
  private static String hash(String text){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}}
