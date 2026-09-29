@@ -1,6 +1,12 @@
 # Agendou - Status de implementação
 
-**Atualizado em:** 28/09/2026. Desenvolvimento na própria pasta do projeto.
+**Atualizado em:** 29/09/2026. Desenvolvimento na própria pasta do projeto.
+
+## Ajuste em 29/09: logomarca no modo claro
+
+- Removido o retângulo bege da versão clara: fundo transparente, lettering escuro (#17212B) e símbolo original preservado. Enquadramento igual ao da versão escura para manter o tamanho visual ao alternar o tema.
+- SVG validado como XML e diff conferido; sem mudança funcional ou nova execução de testes.
+- Próxima tarefa mantida: criação de reserva temporária, snapshots, idempotência e quota (MVP-052/053/054).
 
 ## Implementação em 28/09
 
