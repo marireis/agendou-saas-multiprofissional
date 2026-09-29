@@ -1,0 +1,15 @@
+# ADR-0015 — Consulta pública e revisão com email verificado
+
+Data: 28/09/2026. Status: aceita.
+
+MVP-050/051 entrega serviço → data → horário → nome/email → link de verificação → revisão. Não cria Booking, HOLD, quota, pagamento ou promessa de confirmação. A interface e a resposta reservationEnabled=false explicitam essa fronteira. MVP-052/053/054 implementará a gravação transacional da reserva, snapshots e quota; MVP-055/056, consulta e expiração de reservas.
+
+GET /public/{slug}/availability recebe serviceId e date opcional. Retorna 60 dias com booleano available e candidatos apenas para a data escolhida, em UTC com fuso. Não retorna ocupações, motivos, contato de outros clientes ou IDs de tenant. Usa o mesmo gerador do painel, incluindo buffers/intervalo/antecedência/DST/ocupações. V012 resolve somente slug publicado em função SECURITY DEFINER de projeção mínima; a transação aplica RLS, adquire o lock do tenant e revalida publicação, assinatura operacional, pagamento ativo e serviço do tenant. TenantContext é limpo no finally. Consulta não aceita tenant fornecido pelo cliente.
+
+POST /public/{slug}/access-links exige CSRF, valida nome/email/serviço/início e revalida o horário. Resposta 202 genérica não revela cadastro prévio. Limites por email e conexão usam infraestrutura existente; não confiam em X-Forwarded-For. Token aleatório de 256 bits, somente SHA-256 na tabela protegida por FORCE RLS e FK composta. Válido por 15 minutos. Reenvio revoga tokens anteriores daquele email naquele tenant; os de outros profissionais não são afetados. Payload mínimo retém nome/email e seleção apenas durante a verificação.
+
+O link usa fragmento #token, removido da barra ao abrir a tela. GET não consome o segredo: cliente clica Verificar email e revisar. POST /access-links/consume faz DELETE ... RETURNING condicionado por tenant/hash/validade, garantindo uso único inclusive em concorrência. Revalida o serviço; slot perdido é exibido como indisponível na revisão. Rotaciona ID da sessão e guarda apenas uma revisão verificada de 15 minutos (slug, seleção, nome/email). Não cria autenticação de administrador nem membership. GET /public/{slug}/review exige a revisão da mesma sessão/slug e recalcula valores atuais no servidor. A futura identidade Customer ainda não é persistida como cadastro permanente.
+
+Outbox existente ganha finalidade CUSTOMER_ACCESS. Worker usa função mínima para testar validade, mantém retries/limpeza e cancela mensagens revogadas. Limpeza periódica remove tokens expirados; tabela e funções não expõem contatos fora da API verificada. Conteúdo de email pendente contém o link para entrega; ao enviar/cancelar/expirar é limpo conforme política existente. Envio SMTP não garante entrega na caixa de entrada; local usa Mailpit.
+
+V012 não altera os dados existentes de profissionais. Sessão de revisão não ocupa horário e valores podem mudar até a criação futura da reserva. Limitação operacional existente: limites por conexão ficam compartilhados atrás do proxy local; ingress confiável será necessário no deploy.

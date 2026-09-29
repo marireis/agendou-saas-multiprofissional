@@ -1,13 +1,83 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.14.0
+  version: 0.15.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /public/{slug}/availability:
+    get:
+      security: []
+      summary: Dias e horários disponíveis do serviço público
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: serviceId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: date, in: query, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Sem cache; 60 dias com date/available, slots start/end apenas da data solicitada, today, timezone e reservationEnabled=false. Nenhuma ocupação privada.
+        '404': {description: Página não publicada ou serviço indisponível/externo}
+        '403': {description: Assinatura não operacional}
+        '422': {description: Data fora do horizonte}
+        '429': {description: Limite por conexão; Retry-After}
+  /public/{slug}/access-links:
+    post:
+      security: []
+      summary: Solicitar email de uso único para revisão, com CSRF
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceId, start, name, email]
+              properties:
+                serviceId: {type: string, format: uuid}
+                start: {type: string, format: date-time}
+                name: {type: string, minLength: 1, maxLength: 100}
+                email: {type: string, format: email, maxLength: 254}
+      responses:
+        '202': {description: Resposta genérica; nenhum horário reservado. Link de uso único válido por 15 minutos}
+        '403': {description: CSRF inválido ou assinatura bloqueada}
+        '404': {description: Página/serviço indisponível}
+        '409': {description: Horário não disponível}
+        '429': {description: Limite por email ou conexão; Retry-After}
+  /public/{slug}/access-links/consume:
+    post:
+      security: []
+      summary: Consumir token com CSRF e criar sessão de revisão restrita ao slug
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Revisão privada com nome/email, serviço, início/fim/fuso, preço/entrada atuais em centavos, slotAvailable e reservationEnabled=false; no-store}
+        '400': {description: Link inválido, expirado, de outro tenant ou já consumido}
+        '403': {description: CSRF inválido ou assinatura bloqueada}
+        '404': {description: Página/serviço indisponível}
+        '429': {description: Limite por conexão}
+  /public/{slug}/review:
+    get:
+      summary: Revisão na sessão verificada por 15 minutos; não é reserva
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Mesma revisão do consumo, com preço/disponibilidade recalculados e no-store}
+        '401': {description: Sessão de revisão ausente, expirada ou de outro slug}
+        '403': {description: Assinatura bloqueada}
+        '404': {description: Página/serviço indisponível}
   /admin/calendar:
     get:
       summary: Calendário privado diário, semanal ou mensal com disponibilidade e ocupações vigentes

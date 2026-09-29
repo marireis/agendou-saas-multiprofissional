@@ -49,8 +49,8 @@ public class MailDeliveryService {
             finish(message.id(), "EXPIRED", "LINK_EXPIRED");
             return true;
         }
-        Boolean valid = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM auth_tokens WHERE token_hash=? AND expires_at>?)",
-                Boolean.class, message.tokenHash(), now);
+        Boolean valid = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM auth_tokens WHERE token_hash=? AND expires_at>?) OR public.customer_access_live(?)",
+                Boolean.class, message.tokenHash(), now, message.tokenHash());
         if (!Boolean.TRUE.equals(valid)) {
             finish(message.id(), "CANCELED", "LINK_REVOKED");
             return true;

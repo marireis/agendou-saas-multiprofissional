@@ -29,6 +29,7 @@ public class MailOutboxWorker {
     public void cleanup() {
         Timestamp now = Timestamp.from(clock.instant());
         jdbc.update("DELETE FROM auth_tokens WHERE expires_at<=?", now);
+        jdbc.execute("SELECT public.purge_customer_access()");
         jdbc.update("""
             UPDATE mail_outbox SET status='EXPIRED', body='', recipient='', last_error_code='LINK_EXPIRED'
             WHERE status='PENDING' AND expires_at<=?

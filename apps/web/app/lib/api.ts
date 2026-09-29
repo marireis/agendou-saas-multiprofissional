@@ -29,7 +29,7 @@ export async function api(path: string, method = "GET", body?: unknown) {
   const response = await fetch(`/api/v1${path}`, {
     method, headers, cache: "no-store", body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
   });
-  if (response.status === 401 && !path.startsWith("/auth/")) window.location.assign(path.startsWith("/platform/") ? "/entrar?destino=plataforma" : "/entrar");
+  if (response.status === 401 && !path.startsWith("/auth/") && !path.startsWith("/public/")) window.location.assign(path.startsWith("/platform/") ? "/entrar?destino=plataforma" : "/entrar");
   await requireSuccess(response);
   const text = await response.text();
   return text ? JSON.parse(text) : null;

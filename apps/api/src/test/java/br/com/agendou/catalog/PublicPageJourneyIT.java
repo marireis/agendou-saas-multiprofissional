@@ -23,6 +23,62 @@ class PublicPageJourneyIT {
  @DynamicPropertySource static void database(DynamicPropertyRegistry p){p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.flyway.url",postgres::getJdbcUrl);}
  @Autowired MockMvc mvc;@Autowired AuthService auth;@Autowired JdbcTemplate runtime;
  @Autowired com.fasterxml.jackson.databind.ObjectMapper json;
+ @org.springframework.boot.test.mock.mockito.MockBean org.springframework.mail.javamail.JavaMailSender sender;
+ @Autowired br.com.agendou.identity.MailDeliveryService delivery;
+ @Test void customerEmailWorkerDeliversAndClearsSecretBody()throws Exception{
+  var a=account();var start=publishAndFindStart(a);requestAccess(a,start,UUID.randomUUID()+"@example.test");
+  var hash=owner().queryForObject("SELECT token_hash FROM customer_access_tokens WHERE tenant_id=?",String.class,a.tenant);
+  for(int i=0;i<100&&delivery.deliverNext();i++){}
+  assertThat(owner().queryForObject("SELECT status FROM mail_outbox WHERE token_hash=?",String.class,hash)).isEqualTo("SENT");
+  assertThat(owner().queryForObject("SELECT body||recipient FROM mail_outbox WHERE token_hash=?",String.class,hash)).isEmpty();
+  var messages=org.mockito.ArgumentCaptor.forClass(org.springframework.mail.SimpleMailMessage.class);
+  org.mockito.Mockito.verify(sender,org.mockito.Mockito.atLeastOnce()).send(messages.capture());
+  assertThat(messages.getAllValues()).anySatisfy(message->assertThat(message.getText()).contains("/a/"+a.slug+"/agendar#token=","15 minutos"));
+ }
+ String publishAndFindStart(Account a)throws Exception{
+  ready(a);mvc.perform(post("/api/v1/admin/publication").with(user(a.id.toString())).with(csrf())).andExpect(status().isNoContent());
+  return java.time.LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")).plusDays(2).atTime(9,0).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toInstant().toString();
+ }
+ UUID serviceId(Account a){return owner().queryForObject("SELECT id FROM services WHERE tenant_id=?",UUID.class,a.tenant);}
+ String customerToken(Account a){String body=owner().queryForObject("SELECT body FROM mail_outbox WHERE token_hash IN (SELECT token_hash FROM customer_access_tokens WHERE tenant_id=?) AND status='PENDING'",String.class,a.tenant);return body.split("#token=")[1].split("\\n")[0];}
+ void requestAccess(Account a,String start,String email)throws Exception{
+  mvc.perform(post("/api/v1/public/"+a.slug+"/access-links").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("serviceId",serviceId(a),"start",start,"name","Cliente sintético","email",email)))).andExpect(status().isAccepted());
+ }
+ @Test void customerSelectsVerifiesAndReviewsWithoutCreatingReservation()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var service=serviceId(a);var day=java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString();
+  var response=mvc.perform(get("/api/v1/public/"+a.slug+"/availability").param("serviceId",service.toString()).param("date",day)).andExpect(status().isOk()).andExpect(jsonPath("$.days.length()").value(60)).andExpect(jsonPath("$.slots.length()").value(3)).andExpect(header().string("Cache-Control","no-store")).andReturn().getResponse().getContentAsString();
+  assertThat(response).doesNotContain("Motivo privado",a.tenant.toString(),"email","reason");
+  var email=UUID.randomUUID()+"@example.test";requestAccess(a,start,email);var token=customerToken(a);
+  assertThat(owner().queryForObject("SELECT token_hash FROM customer_access_tokens WHERE tenant_id=?",String.class,a.tenant)).doesNotContain(token);
+  assertThat(runtime.queryForObject("SELECT count(*) FROM customer_access_tokens",Long.class)).isZero();
+  mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isForbidden());
+  var result=mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isOk()).andExpect(jsonPath("$.email").value(email)).andExpect(jsonPath("$.priceCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.slotAvailable").value(true)).andExpect(jsonPath("$.reservationEnabled").value(false)).andReturn();
+  var session=result.getResponse().getCookie("SESSION");
+  mvc.perform(get("/api/v1/public/"+a.slug+"/review").cookie(session)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/admin/profile").cookie(session)).andExpect(status().isUnauthorized());
+  mvc.perform(get("/api/v1/public/other/review").cookie(session)).andExpect(status().isUnauthorized());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isBadRequest());
+  assertThat(owner().queryForObject("SELECT count(*) FROM calendar_allocations WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+ }
+ @Test void customerTokensAreTenantBoundExpireAndResendRevokesOldLink()throws Exception{
+  var a=account();var b=account();var start=publishAndFindStart(a);publishAndFindStart(b);var email=UUID.randomUUID()+"@example.test";
+  requestAccess(a,start,email);var old=customerToken(a);requestAccess(a,start,email);var token=customerToken(a);assertThat(token).isNotEqualTo(old);
+  for(var pair:List.of(new String[]{a.slug,old},new String[]{b.slug,token}))mvc.perform(post("/api/v1/public/"+pair[0]+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",pair[1])))).andExpect(status().isBadRequest());
+  owner().update("UPDATE customer_access_tokens SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+  mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isBadRequest());
+  runtime.execute("SELECT public.purge_customer_access()");assertThat(owner().queryForObject("SELECT count(*) FROM customer_access_tokens WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+ }
+ @Test void customerCannotSelectPrivateForeignInactiveOrBlockedResources()throws Exception{
+  var a=account();var b=account();var start=publishAndFindStart(a);ready(b);
+  mvc.perform(get("/api/v1/public/"+b.slug+"/availability").param("serviceId",serviceId(b).toString())).andExpect(status().isNotFound());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/availability").param("serviceId",serviceId(b).toString())).andExpect(status().isNotFound());
+  owner().update("UPDATE services SET active=false WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/public/"+a.slug+"/availability").param("serviceId",serviceId(a).toString())).andExpect(status().isNotFound());
+  owner().update("UPDATE services SET active=true WHERE tenant_id=?",a.tenant);
+  mvc.perform(post("/api/v1/public/"+a.slug+"/access-links").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("serviceId",serviceId(a),"start",java.time.Instant.parse(start).plusSeconds(7200),"name","Cliente","email",UUID.randomUUID()+"@example.test")))).andExpect(status().isConflict());
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/public/"+a.slug+"/availability").param("serviceId",serviceId(a).toString())).andExpect(status().isForbidden());
+ }
  void ready(Account a)throws Exception{
   owner().update("UPDATE public_profiles SET description='Atendimento de teste',contact_email='public@example.test',service_mode='ONLINE' WHERE tenant_id=?",a.tenant);
   owner().update("INSERT INTO services(id,tenant_id,name,description,duration_minutes,price_cents,buffer_before_minutes,buffer_after_minutes,deposit_percent,active) VALUES (?,?,'Consulta','Serviço de teste',30,10000,0,0,50,true)",UUID.randomUUID(),a.tenant);

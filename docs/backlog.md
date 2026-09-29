@@ -79,8 +79,8 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** cliente cria uma solicitacao privada sem conta permanente.
 
-- [ ] **MVP-050:** fluxo publico servico -> data/hora -> contato -> verificacao -> revisao.
-- [ ] **MVP-051:** token de acesso unico com hash, validade de 15 min e respostas genericas.
+- [x] **MVP-050:** fluxo público serviço → data → horário → nome/email → verificação → revisão, com disponibilidade real. Não cria reserva até MVP-052/053/054.
+- [x] **MVP-051:** token de uso único com hash, validade de 15 min, respostas genéricas, reenvio/revogação, outbox e sessão de revisão restrita ao slug. V012/ADR-0015.
 - [ ] **MVP-052:** criar reserva temporaria, snapshots, alocacao, quota provisoria e outbox na mesma transacao.
 - [ ] **MVP-053:** implementar idempotencia por tenant/ator/operacao e hash do corpo.
 - [ ] **MVP-054:** implementar quota mensal e provisoria conforme plano vigente, sem descartar recebimento por limite.

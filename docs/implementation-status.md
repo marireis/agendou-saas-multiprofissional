@@ -6,6 +6,17 @@
 
 **Atualização após a revisão:** MVP-044 implementado nesta entrega. Nova aba `/painel/calendario`, consulta privada mensal/semanal/diária e integração de bloqueios; detalhes a seguir. Os itens da revisão inicial abaixo foram levantados antes desta implementação.
 
+### Entrega mais recente em 28/09: jornada pública e verificação de cliente (MVP-050/051)
+
+- Rota /a/{slug}/agendar: serviço → calendário com dias disponíveis → horário → nome/email → verificação por link → revisão. Consulta usa disponibilidade real, por serviço, no fuso do profissional. Trocar serviço/data limpa escolhas posteriores; respostas antigas são descartadas.
+- GET público de disponibilidade não expõe ocupações, motivos privados ou dados de outros clientes. Resolve somente página publicada, aplica RLS e revalida assinatura, pagamento ativo e serviço sob lock do tenant. Horizonte, antecedência, exceções, buffers e intervalos são os mesmos do painel.
+- Link de 256 bits com hash SHA-256, validade de 15 minutos, uso único e escopo do profissional. Reenvio revoga anterior do mesmo email/tenant. CSRF e limites por email/conexão; resposta genérica. Token em fragmento, removido da URL, consumo somente após clique explícito.
+- Sessão de revisão restrita ao slug por 15 minutos, sem privilégios administrativos. Preço e entrada recalculados pelo servidor; revisão avisa se horário foi ocupado. Não cria cadastro permanente Customer, Booking, HOLD, quota ou pagamento ainda.
+- Outbox existente envia os links e limpa destinatário/conteúdo após entrega; tokens expirados são removidos pelo worker. V012 adiciona customer_access_tokens com FORCE RLS e FK composta, funções mínimas para resolução de slug/worker e finalidade CUSTOMER_ACCESS. OpenAPI 0.15.0 e ADR-0015.
+- Limite explícito da entrega: consultar/verificar/revisar não reserva horário. reservationEnabled continua false, sem botão de confirmação fictício. A página pública oferece Consultar serviços e horários; a prévia privada não abre uma agenda pública de rascunho.
+- Validação: build e typecheck aprovados; 27 unitários e 63 integrações nos relatórios finais. A suíte inicial identificou um erro no teste que reutilizava MockHttpSession em vez do cookie Spring Session; corrigido, os 10 testes de PublicPageJourneyIT passaram, incluindo a nova validação do worker com transporte SMTP simulado. Logs customer-verify.log, customer-journey-verify.log e customer-build.log. Homologação completa por navegador/email real permanece pendente.
+- Próxima entrega: MVP-052/053/054 — criar reserva temporária com alocação, snapshots, idempotência e quota na mesma transação. Depois MVP-055/056 (Meus agendamentos/expiração) e PIX/conferência MVP-060+.
+
 ### Ajuste em 28/09: botões de contato
 
 - Vamos conversar? usa botões com ícones e texto: Enviar email abre mailto; Conversar no WhatsApp abre wa.me para o telefone comercial. Disponíveis também na prévia; sem envio automático.
@@ -222,9 +233,9 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 
 | Check | Evidência |
 |---|---|
-| `mvnw.cmd verify` | PASS: 27 testes unitários + 59 de integração (86 no total), sem falhas ou testes ignorados; PostgreSQL 17 e Mailpit descartáveis |
-| Migrations V001 a V011 | Aplicadas em bancos descartáveis, usando role real de runtime |
-| Atualização de banco existente | V003 → V011 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
+| `mvnw.cmd verify` | Relatórios finais: 27 unitários + 63 integrações (90 únicos), todos aprovados após correção do teste de cookie e reexecução da classe PublicPageJourneyIT; PostgreSQL descartável, transporte do novo email simulado |
+| Migrations V001 a V012 | Aplicadas em bancos descartáveis, usando role real de runtime |
+| Atualização de banco existente | V003 → V012 preserva usuário, token e todos os dados da assinatura/trial; email legado pendente expira e tem conteúdo limpo |
 | Calendário | Grade de 42 dias, indicadores livre/ocupado/indisponível, expiração e bloqueios; consulta diária/semanal, faixa atravessando a data, exceções, RLS, leitura após bloqueio, HOLD expirado omitido, limites semiabertos e dias civis de 23/25h |
 | Alocações/bloqueios | Corridas HOLD/bloqueio e HOLD/expediente, GiST direto, limites adjacentes, intervalo, expiração, fuso protegido, RLS/CSRF, bloqueio de assinatura e liberação sem excluir histórico |
 | Gerador de horários | Grade/fuso, antecedência/horizonte, pausas, exceções, duração/buffers, intervalo, limites semiabertos e DST; consulta isolada, serviço inativo/externo negado |
@@ -272,7 +283,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 
 1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
 2. **Concluído — Compartilhamento (MVP-036):** aba com copiar link/mensagem, convite editável e abertura no WhatsApp, condicionada à publicação.
-3. **Próxima entrega — Reserva:** acesso do cliente, idempotência, quota, snapshots e expiração (MVP-050 a 056); concluir MVP-045 para os estados de Booking e integrar reservas ao calendário.
+3. **Próxima entrega — criação de reserva (MVP-052/053/054):** alocação, idempotência, quota e snapshots transacionais. MVP-050/051 (seleção, acesso verificado e revisão) concluídos; MVP-055/056 e integração de Booking no calendário vêm depois.
 4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
 5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
@@ -292,7 +303,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Última verificação local em 28/09: banco permanece em V011, sem nova migration; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/painel/calendario`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Última verificação local em 28/09: migração V012 aplicada sobre V011 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/painel/calendario`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
 - Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, mas reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas terão idempotência própria em MVP-053.
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.

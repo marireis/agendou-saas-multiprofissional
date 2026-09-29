@@ -145,3 +145,5 @@ As próximas migrations devem continuar a numeração existente, sem reutilizar 
 - V005: platform_roles (runtime somente leitura), platform_mfa (segredo cifrado, versao e consumo TOTP), billing_decisions (RLS, referencia unica, estados antes/depois), platform_audit (metadados append-only para runtime) e funcao de listagem restrita. Sem BYPASSRLS para a aplicacao. Provisionamento nao altera usuarios, perfis ou trials.
 
 - V004: contadores globais de autenticacao e ciclo de vida da outbox, com status, finalidade, vinculo ao usuario/token, validade e diagnostico sem dados sensiveis. Tabelas globais de infraestrutura nao aceitam tenant fornecido pelo cliente e nao possuem CRUD publico.
+
+- V012: customer_access_tokens (hash, tenant, serviço, início escolhido, nome/email e validade), FORCE RLS e FK composta. Infraestrutura de verificação temporária; ainda não é Customer/Booking. Outbox CUSTOMER_ACCESS e funções mínimas para resolver slug publicado, validar token no worker e limpar expirados. Sessão Spring Session guarda revisão serializável com validade de 15 minutos. ADR-0015.
