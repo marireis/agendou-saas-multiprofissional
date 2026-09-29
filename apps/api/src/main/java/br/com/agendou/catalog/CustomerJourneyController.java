@@ -21,8 +21,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController @RequestMapping("/api/v1/public/{slug}")
 public class CustomerJourneyController {
- private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;private final AuthRateLimiter limiter;private final String publicUrl;
- public CustomerJourneyController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock,AuthRateLimiter limiter,@Value("${agendou.public-url}") String publicUrl){this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;this.limiter=limiter;this.publicUrl=publicUrl;}
+ private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;private final AuthRateLimiter limiter;private final String publicUrl;private final BookingService bookings;
+ public CustomerJourneyController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock,AuthRateLimiter limiter,@Value("${agendou.public-url}") String publicUrl,BookingService bookings){this.bookings=bookings;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;this.limiter=limiter;this.publicUrl=publicUrl;}
  public record Access(@NotNull UUID serviceId,@NotNull Instant start,@NotBlank @Size(max=100) String name,@NotBlank @Email @Size(max=254) String email){}
  public record Token(@NotBlank @Size(max=128) String token){}
  public record Verified(String slug,UUID serviceId,Instant start,String name,String email,Instant expiresAt) implements java.io.Serializable{}
@@ -42,7 +42,7 @@ public class CustomerJourneyController {
   try{bind(slug);var service=service(serviceId);var zone=calendar.zone();var now=clock.instant();var today=now.atZone(zone).toLocalDate();var config=schedule();var occupied=calendar.occupied();
    if(date!=null&&(date.isBefore(today)||!date.isBefore(today.plusDays(60))))throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Escolha uma data nos próximos 60 dias.");
    var days=new ArrayList<Map<String,Object>>();for(int i=0;i<60;i++){var day=today.plusDays(i);days.add(Map.of("date",day,"available",!SlotGenerator.generate(config,service.timing(),zone,day,now,occupied).candidates().isEmpty()));}
-   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Map.of("timezone",zone.getId(),"today",today,"days",days,"slots",date==null?List.of():SlotGenerator.generate(config,service.timing(),zone,date,now,occupied).candidates(),"reservationEnabled",false));
+   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Map.of("timezone",zone.getId(),"today",today,"days",days,"slots",date==null?List.of():SlotGenerator.generate(config,service.timing(),zone,date,now,occupied).candidates(),"reservationEnabled",true));
   }finally{TenantContext.clear();}
  }
  @PostMapping("/access-links") @Transactional public ResponseEntity<?> request(@PathVariable String slug,@Valid @RequestBody Access body)throws Exception{
@@ -72,7 +72,25 @@ public class CustomerJourneyController {
   if(!(value instanceof Verified verified)||!verified.slug().equals(slug)||!clock.instant().isBefore(verified.expiresAt()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Verifique seu email para revisar a solicitação.");
   try{bind(slug);return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(reviewData(verified));}finally{TenantContext.clear();}
  }
- private Map<String,Object> reviewData(Verified value)throws Exception{var service=service(value.serviceId());var deposit=(service.price()*service.deposit()+99)/100;return Map.of("name",value.name(),"email",value.email(),"serviceName",service.name(),"start",value.start(),"end",value.start().plusSeconds(service.duration()*60L),"timezone",calendar.zone().getId(),"priceCents",service.price(),"depositCents",deposit,"slotAvailable",available(service,value.start()),"reservationEnabled",false);}
+ private Map<String,Object> reviewData(Verified value)throws Exception{var service=service(value.serviceId());var deposit=(service.price()*service.deposit()+99)/100;var result=new LinkedHashMap<String,Object>(Map.of("name",value.name(),"email",value.email(),"serviceName",service.name(),"start",value.start(),"end",value.start().plusSeconds(service.duration()*60L),"timezone",calendar.zone().getId(),"priceCents",service.price(),"depositCents",deposit,"slotAvailable",available(service,value.start()),"reservationEnabled",true));result.putAll(bookings.reviewQuote(value.serviceId()));return result;}
+ public record CreateBooking(@NotBlank @Pattern(regexp="[a-f0-9]{64}") String quote){}
+ public record LastBooking(Verified actor,UUID id,Instant expiresAt) implements java.io.Serializable{}
+ private Verified verified(String slug,HttpServletRequest request){var session=request.getSession(false);var value=session==null?null:session.getAttribute("customerReview");if(!(value instanceof Verified actor)||!actor.slug().equals(slug)||!clock.instant().isBefore(actor.expiresAt()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Verifique seu email novamente.");return actor;}
+ @PostMapping("/bookings") public ResponseEntity<?> createBooking(@PathVariable String slug,@RequestHeader("Idempotency-Key") UUID key,@Valid @RequestBody CreateBooking body,HttpServletRequest request)throws Exception{
+  var actor=verified(slug,request);var receipt=bookings.create(actor,key,body.quote());
+  UUID id=UUID.fromString(receipt.get("id").toString());Instant expiry=Instant.parse(receipt.get("expiresAt").toString());
+  request.getSession().setAttribute("customerBookingReceipt",new LastBooking(actor,id,expiry.plusSeconds(300)));
+  request.getSession().setAttribute("customerPortal",new CustomerPortalController.Access(slug,actor.email(),clock.instant().plusSeconds(3600)));
+  return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(receipt);
+ }
+ @GetMapping("/bookings/current") public ResponseEntity<?> currentBooking(@PathVariable String slug,HttpServletRequest request){
+  var session=request.getSession(false);var value=session==null?null:session.getAttribute("customerBookingReceipt");
+  if(!(value instanceof LastBooking last)||!last.actor().slug().equals(slug)||!clock.instant().isBefore(last.expiresAt()))throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Nenhuma solicitação recente nesta sessão.");
+  return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(bookings.get(last.actor(),last.id()));
+ }
+ @GetMapping("/bookings/{id}") public ResponseEntity<?> booking(@PathVariable String slug,@PathVariable UUID id,HttpServletRequest request){
+  return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(bookings.get(verified(slug,request),id));
+ }
  private static String hash(String token){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));}catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}}
  private static ResponseStatusException unavailable(){return new ResponseStatusException(HttpStatus.NOT_FOUND,"Página ou serviço indisponível.");}
 }

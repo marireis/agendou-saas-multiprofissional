@@ -36,21 +36,21 @@ public class MailDeliveryService {
     public boolean deliverNext() {
         Timestamp now = Timestamp.from(clock.instant());
         var messages = jdbc.query("""
-            SELECT id, recipient, subject, body, attempts, expires_at, token_hash
+            SELECT id, recipient, subject, body, attempts, expires_at, token_hash, booking_id
             FROM mail_outbox WHERE status='PENDING' AND (next_attempt_at<=? OR expires_at<=?)
             ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
             """, (rs, n) -> new Message(rs.getObject("id", UUID.class), rs.getString("recipient"),
                 rs.getString("subject"), rs.getString("body"), rs.getInt("attempts"),
                 rs.getTimestamp("expires_at") == null ? null : rs.getTimestamp("expires_at").toInstant(),
-                rs.getString("token_hash")), now, now);
+                rs.getString("token_hash"),rs.getObject("booking_id",UUID.class)), now, now);
         if (messages.isEmpty()) return false;
         Message message = messages.getFirst();
         if (message.expiresAt() == null || !clock.instant().isBefore(message.expiresAt())) {
             finish(message.id(), "EXPIRED", "LINK_EXPIRED");
             return true;
         }
-        Boolean valid = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM auth_tokens WHERE token_hash=? AND expires_at>?) OR public.customer_access_live(?)",
-                Boolean.class, message.tokenHash(), now, message.tokenHash());
+        Boolean valid = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM auth_tokens WHERE token_hash=? AND expires_at>?) OR public.customer_access_live(?) OR public.booking_notice_live(?)",
+                Boolean.class, message.tokenHash(), now, message.tokenHash(),message.bookingId());
         if (!Boolean.TRUE.equals(valid)) {
             finish(message.id(), "CANCELED", "LINK_REVOKED");
             return true;
@@ -87,5 +87,5 @@ public class MailDeliveryService {
     }
 
     private record Message(UUID id, String recipient, String subject, String body, int attempts,
-            Instant expiresAt, String tokenHash) {}
+            Instant expiresAt, String tokenHash,UUID bookingId) {}
 }

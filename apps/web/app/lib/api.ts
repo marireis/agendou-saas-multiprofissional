@@ -17,8 +17,9 @@ async function requireSuccess(response: Response) {
   );
 }
 
-export async function api(path: string, method = "GET", body?: unknown) {
+export async function api(path: string, method = "GET", body?: unknown, idempotencyKey?: string) {
   const headers: Record<string, string> = {};
+  if(idempotencyKey)headers["Idempotency-Key"]=idempotencyKey;
   if (method !== "GET") {
     const response = await fetch("/api/v1/auth/csrf", { cache: "no-store" });
     await requireSuccess(response);

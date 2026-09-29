@@ -2,6 +2,18 @@
 
 **Atualizado em:** 29/09/2026. Desenvolvimento na própria pasta do projeto.
 
+## Entrega em 29/09: reservas temporárias (MVP-052/053/054)
+
+- Após verificar email e revisar serviço/valores/política, o cliente pode solicitar reserva temporária por 30 minutos. Recibo com protocolo, prazo e estado; atualização automática e recuperação da solicitação recente na mesma sessão. Ainda não confirma atendimento nem habilita transferência/comprovante PIX.
+- Uma transação cria cliente, reserva, alocação, snapshots de serviço/PIX, quota provisória, evento, recibo idempotente e outbox. Lock por tenant e GiST impedem dupla reserva; alterações de valores/condições exigem nova revisão. Repetir a mesma chave/conteúdo devolve o recibo original; conteúdo diferente gera conflito.
+- Quota mensal conforme o plano vigente, no mês do atendimento e fuso do profissional; reservas temporárias consomem provisoriamente e expiração libera consumo. Limites configuráveis no banco; valores comerciais ainda pendentes de decisão. Sugestão apresentada: Básico 50, Intermediário 200, Premium ilimitado. A V013 mantém os planos sem teto até essa definição.
+- Expiração síncrona e worker básico liberam horário/quota e preservam histórico. MVP-056 permanece parcial: operação por lotes/leases e integração dos futuros estados de pagamento pendentes. Calendário profissional identifica Solicitação pendente e o serviço, sem confundir com atendimento confirmado.
+- V013 com FORCE RLS/FKs compostas e snapshots/recibos imutáveis para o runtime. OpenAPI 0.16.0 e ADR-0016. Consulta de recibo restrita ao email verificado/slug; sessão recente não substitui Meus agendamentos ou acesso em outro dispositivo.
+- Validação: 27 testes unitários e 68 de integração nos relatórios finais, sem falhas. A execução completa encontrou um erro na fixture de assinatura Básico/trial; corrigido, PublicPageJourneyIT e CalendarJourneyIT passaram juntos (24 testes). Cobertura inclui concorrência, rollback da transação quando a outbox falha, idempotência, isolamento, snapshots, quota e expiração. Build e typecheck aprovados; homologação visual/email externo ainda pendentes. Logs booking-verify.log, booking-final-verify.log e booking-build.log.
+- **Próxima tarefa: MVP-055 — Meus agendamentos**, com acesso verificado, lista e detalhe das reservas do cliente. Depois completar MVP-056 e implementar PIX/comprovantes/conferência MVP-060+.
+
+As seções datadas abaixo preservam o histórico; o estado atual e a próxima tarefa estão nesta entrega e na lista consolidada ao final.
+
 ## Ajuste em 29/09: logomarca no modo claro
 
 - Removido o retângulo bege da versão clara: fundo transparente, lettering escuro (#17212B) e símbolo original preservado. Enquadramento igual ao da versão escura para manter o tamanho visual ao alternar o tema.
@@ -272,24 +284,24 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - **MVP-015:** outbox com estados, retries, limpeza e SMTP local validado. SES, alertas e console operacional autenticado pendentes.
 - **MVP-016:** shell/erros/correlation ID implementados; telemetria e observabilidade completas ainda pendentes.
 - **MVP-020/021/022/023/024:** planos, trial, banners, eventos, BillingDecision, auditoria administrativa e expiração disponíveis. Retenção/exportação operacional para homologação.
-- **MVP-025/026:** bloqueio real sobre perfil e consultas essenciais preservadas. Fluxos de pagamento, reserva e publicação ainda não implementados.
+- **MVP-025/026:** bloqueio real sobre perfil e consultas essenciais preservadas. Publicação e reserva temporária integradas; pagamento ainda pendente.
 - **MVP-027/029:** reativação por pagamento, suspensão/retirada, consulta e auditoria no painel de plataforma com MFA concluídas. Sem cancelamento ou impersonação neste painel mínimo.
 - **MVP-028:** email único impede novo trial na mesma conta. Documento/telefone ainda não são coletados.
-- **MVP-030/031:** perfil, contato, modalidade/local, progresso e upload/remoção de logo implementados. Exposição pública da variante saneada aguarda publicação da página.
-- **MVP-032:** catálogo administrativo funcional e testado; publicação, snapshots e reserva dependem das próximas etapas.
-- **MVP-033:** configuração PIX/política, validação local, auditoria e versões imutáveis concluídas. Referência/cópia por reserva entra no MVP-052, sem reescrever condições anteriores.
-- **MVP-034/035:** página, prévia, requisitos reais, publicação explícita e retirada implementados. CTA de reserva será integrado no MVP-050+.
+- **MVP-030/031:** perfil, contato, modalidade/local, progresso e upload/remoção de logo implementados. Variante saneada exposta na página publicada.
+- **MVP-032:** catálogo administrativo funcional e testado, integrado à publicação e aos snapshots da reserva temporária.
+- **MVP-033:** configuração PIX/política, validação local, auditoria e versões imutáveis concluídas. Referência/cópia por reserva implementada em V013, sem reescrever condições anteriores.
+- **MVP-034/035:** página, prévia, requisitos reais, publicação explícita e retirada implementados. Jornada pública e solicitação temporária integradas.
 
 - **MVP-040:** configuração de expediente, pausas, exceções e bloqueios concluída.
 - **MVP-041:** gerador e prévia privada concluídos e integrados com alocações persistidas.
-- **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs; integração com Booking pendente.
+- **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs integrados ao Booking temporário; futuras transições de pagamento pendentes.
 - **MVP-044:** calendário visual mensal/semanal e lista diária implementado em 28/09; consulta por período e criação/liberação de bloqueios integradas.
 
 ## Próximas implementações
 
 1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
 2. **Concluído — Compartilhamento (MVP-036):** aba com copiar link/mensagem, convite editável e abertura no WhatsApp, condicionada à publicação.
-3. **Próxima entrega — criação de reserva (MVP-052/053/054):** alocação, idempotência, quota e snapshots transacionais. MVP-050/051 (seleção, acesso verificado e revisão) concluídos; MVP-055/056 e integração de Booking no calendário vêm depois.
+3. **Próxima entrega — Meus agendamentos (MVP-055):** acesso verificado, lista e detalhe por cliente. MVP-052/053 concluídos; mecanismo MVP-054 implementado, números comerciais pendentes. Expiração básica e reservas temporárias no calendário disponíveis; completar operação de MVP-056 em seguida.
 4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
 5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
@@ -299,7 +311,7 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 |---|---|
 | Acesso superadmin | Implementado e acesso com autenticador confirmado pela responsável |
 | Página com logomarca do profissional | Página, prévia e publicação explícita com requisitos reais implementadas |
-| Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; integração futura de reservas em MVP-045 pendente |
+| Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; reservas temporárias integradas; confirmação/pagamento pendentes |
 | Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
 | Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
 | Compartilhar link e mensagem no WhatsApp | MVP-036 implementado; copiar link/mensagem e abrir WhatsApp, sem envio automático |
@@ -309,9 +321,9 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Última verificação local em 28/09: migração V012 aplicada sobre V011 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/painel/calendario`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
-- Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, mas reservas, uploads de comprovantes, financeiro do profissional, clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
-- Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas terão idempotência própria em MVP-053.
+- Última verificação local em 29/09: migração V013 aplicada sobre V012 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/entrar`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, com reservas temporárias. Meus agendamentos, comprovantes, financeiro do profissional, aba Clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
+- Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas temporárias já usam chave idempotente própria (MVP-053).
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.
 - Recuperação de MFA é operacional/auditada; não há backup codes ou reset público. A chave DPAPI depende deste usuário Windows; produção exige gestão de segredos própria.
 - PIX: validação local não atesta registro/titularidade. Chaves ficam em tabelas privadas com RLS, sem cifragem adicional na aplicação; TLS, criptografia de volume/backup, acesso operacional e retenção de versões devem ser definidos no deploy. Não registrar corpos/chaves em logs.

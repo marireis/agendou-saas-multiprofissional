@@ -16,7 +16,7 @@ public class CalendarViewController {
  private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final ObjectMapper json;private final Clock clock;private final CalendarService calendar;
  public CalendarViewController(JdbcTemplate jdbc,TenantSessionConfigurer tenants,ObjectMapper json,Clock clock,CalendarService calendar){this.calendar=calendar;this.jdbc=jdbc;this.tenants=tenants;this.json=json;this.clock=clock;}
  public record Day(LocalDate date,Instant start,Instant end,boolean exception,String reason,List<AvailabilityController.Period> periods,String status,long occupiedCount){}
- public record Event(UUID id,String kind,Instant start,Instant end,Instant protectedStart,Instant protectedEnd,Instant expiresAt,String reason){}
+ public record Event(UUID id,String kind,Instant start,Instant end,Instant protectedStart,Instant protectedEnd,Instant expiresAt,String reason,UUID bookingId,String serviceName){}
  @GetMapping @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
  public ResponseEntity<?> view(@RequestParam(required=false) LocalDate from,@RequestParam(defaultValue="7") int days)throws Exception{
   if(days!=1&&days!=7&&days!=42)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Escolha um dia, uma semana ou a grade mensal.");
@@ -39,10 +39,10 @@ public class CalendarViewController {
    dates.add(new Day(date,date.atStartOfDay(zone).toInstant(),date.plusDays(1).atStartOfDay(zone).toInstant(),special.isPresent(),special.map(AvailabilityController.ExceptionDay::reason).orElse(""),periods.stream().sorted(Comparator.comparing(AvailabilityController.Period::start)).toList(),!available?"UNAVAILABLE":count>0?"OCCUPIED":"FREE",count));
   }
   var events=jdbc.query("""
-   SELECT id,kind,starts_at,ends_at,protected_start,protected_end,expires_at,reason FROM calendar_allocations
-   WHERE tenant_id=? AND active AND (expires_at IS NULL OR expires_at>?)
-    AND protected_start<? AND protected_end>? ORDER BY starts_at,id
-   """,(r,n)->new Event(r.getObject(1,UUID.class),r.getString(2),r.getTimestamp(3).toInstant(),r.getTimestamp(4).toInstant(),r.getTimestamp(5).toInstant(),r.getTimestamp(6).toInstant(),r.getTimestamp(7)==null?null:r.getTimestamp(7).toInstant(),r.getString(8)),tenant,Timestamp.from(now),Timestamp.from(end),Timestamp.from(start));
+   SELECT a.id,a.kind,a.starts_at,a.ends_at,a.protected_start,a.protected_end,a.expires_at,a.reason,b.id,b.service_snapshot->>'name' FROM calendar_allocations a LEFT JOIN bookings b ON b.tenant_id=a.tenant_id AND b.allocation_id=a.id
+   WHERE a.tenant_id=? AND a.active AND (a.expires_at IS NULL OR a.expires_at>?)
+    AND a.protected_start<? AND a.protected_end>? ORDER BY a.starts_at,a.id
+   """,(r,n)->new Event(r.getObject(1,UUID.class),r.getString(2),r.getTimestamp(3).toInstant(),r.getTimestamp(4).toInstant(),r.getTimestamp(5).toInstant(),r.getTimestamp(6).toInstant(),r.getTimestamp(7)==null?null:r.getTimestamp(7).toInstant(),r.getString(8),r.getObject(9,UUID.class),r.getString(10)),tenant,Timestamp.from(now),Timestamp.from(end),Timestamp.from(start));
   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Map.of("timezone",zone.getId(),"today",today,"from",first,"days",dates,"events",events,"generatedAt",now,"intervalMinutes",schedule.intervalMinutes()));
  }
 }

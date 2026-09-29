@@ -25,6 +25,112 @@ class PublicPageJourneyIT {
  @Autowired com.fasterxml.jackson.databind.ObjectMapper json;
  @org.springframework.boot.test.mock.mockito.MockBean org.springframework.mail.javamail.JavaMailSender sender;
  @Autowired br.com.agendou.identity.MailDeliveryService delivery;
+ @Autowired BookingService bookings;
+ record Client(jakarta.servlet.http.Cookie cookie,String quote){}
+ String portalEmail(Account a){return owner().queryForObject("SELECT email FROM customers WHERE tenant_id=? LIMIT 1",String.class,a.tenant);}
+ String portalToken(Account a){String body=owner().queryForObject("SELECT body FROM mail_outbox WHERE purpose='CUSTOMER_PORTAL' AND token_hash IN (SELECT token_hash FROM customer_portal_tokens WHERE tenant_id=?)",String.class,a.tenant);return body.split("#token=")[1].split("&email=")[0];}
+ org.springframework.test.web.servlet.ResultActions portalRequest(String slug,String email)throws Exception{return mvc.perform(post("/api/v1/public/"+slug+"/client/access-links").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("email",email))));}
+ org.springframework.test.web.servlet.ResultActions portalConsume(Account a,String email,String token)throws Exception{return mvc.perform(post("/api/v1/public/"+a.slug+"/client/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("email",email,"token",token))));}
+ @Test void portalReopensHistoryAfterUnpublishingAndSubscriptionExpiry()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));var created=reserve(a,c,UUID.randomUUID()).andExpect(status().isCreated()).andReturn();var id=json.readTree(created.getResponse().getContentAsString()).get("id").asText();
+  String email=portalEmail(a);owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+  portalRequest(a.slug,email).andExpect(status().isAccepted());String token=portalToken(a);
+  for(int i=0;i<100&&delivery.deliverNext();i++){}
+  assertThat(owner().queryForObject("SELECT status FROM mail_outbox WHERE purpose='CUSTOMER_PORTAL' AND token_hash IN (SELECT token_hash FROM customer_portal_tokens WHERE tenant_id=?)",String.class,a.tenant)).isEqualTo("SENT");
+  var access=portalConsume(a,email,token).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings").cookie(access)).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].status").value("EXPIRED")).andExpect(jsonPath("$.hasMore").value(false));
+  String detail=mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id).cookie(access)).andExpect(status().isOk()).andExpect(jsonPath("$.events.length()").value(2)).andExpect(jsonPath("$.cancellationPolicy").value("Solicite cancelamento pelo contato.")).andReturn().getResponse().getContentAsString();
+  assertThat(detail).doesNotContain("pixKey","private@example.test","paymentInstructions");
+  portalConsume(a,email,token).andExpect(status().isBadRequest());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings").cookie(access).param("offset","-1")).andExpect(status().isBadRequest());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/client/logout").cookie(access)).andExpect(status().isForbidden());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/client/logout").cookie(access).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings").cookie(access)).andExpect(status().isUnauthorized());
+ }
+ @Test void portalIsScopedToVerifiedEmailAndTenant()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var first=client(a,start);var second=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());
+  reserve(a,first,UUID.randomUUID()).andExpect(status().isCreated());var other=reserve(a,second,UUID.randomUUID()).andExpect(status().isCreated()).andReturn();String otherId=json.readTree(other.getResponse().getContentAsString()).get("id").asText();
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings")).andExpect(status().isUnauthorized());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings").cookie(first.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1));
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+otherId).cookie(first.cookie)).andExpect(status().isNotFound());
+  var b=account();mvc.perform(get("/api/v1/public/"+b.slug+"/client/bookings").cookie(first.cookie)).andExpect(status().isUnauthorized());
+  assertThat(runtime.queryForObject("SELECT count(*) FROM customer_portal_tokens",Long.class)).isZero();
+ }
+ @Test void portalLinksAreGenericRevocableExpiringAndRequireCsrf()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));reserve(a,c,UUID.randomUUID()).andExpect(status().isCreated());String email=portalEmail(a);
+  var unknown=portalRequest("unknown",UUID.randomUUID()+"@example.test").andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+  var known=portalRequest(a.slug,email).andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();assertThat(unknown).isEqualTo(known);String first=portalToken(a);
+  portalRequest(a.slug,email).andExpect(status().isAccepted());String second=portalToken(a);assertThat(second).isNotEqualTo(first);
+  portalConsume(a,email,first).andExpect(status().isBadRequest());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/client/access-links/consume").contentType("application/json").content(json.writeValueAsBytes(Map.of("email",email,"token",second)))).andExpect(status().isForbidden());
+  owner().update("UPDATE customer_portal_tokens SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+  portalConsume(a,email,second).andExpect(status().isBadRequest());
+  owner().execute("SELECT public.purge_customer_access()");assertThat(owner().queryForObject("SELECT count(*) FROM customer_portal_tokens WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+ }
+ Client client(Account a,String start)throws Exception{
+  requestAccess(a,start,UUID.randomUUID()+"@example.test");var token=customerToken(a);
+  var result=mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isOk()).andReturn();
+  return new Client(result.getResponse().getCookie("SESSION"),json.readTree(result.getResponse().getContentAsString()).get("quote").asText());
+ }
+ org.springframework.test.web.servlet.ResultActions reserve(Account a,Client client,UUID key)throws Exception{return mvc.perform(post("/api/v1/public/"+a.slug+"/bookings").cookie(client.cookie).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(json.writeValueAsBytes(Map.of("quote",client.quote))));}
+ @Test void temporaryBookingIsAtomicIdempotentPrivateAndKeepsSnapshots()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);var key=UUID.randomUUID();
+  var result=reserve(a,c,key).andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT")).andReturn();String body=result.getResponse().getContentAsString();var id=UUID.fromString(json.readTree(body).get("id").asText());
+  assertThat(body).doesNotContain("pixKey","private@example.test");
+  reserve(a,c,key).andExpect(status().isCreated()).andExpect(content().json(body));
+  reserve(a,c,UUID.randomUUID()).andExpect(status().isConflict());
+  for(var table:List.of("bookings","customers","booking_usage","booking_requests","calendar_allocations"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT count(*) FROM mail_outbox WHERE booking_id=?",Long.class,id)).isEqualTo(1);
+  assertThat(runtime.queryForObject("SELECT count(*) FROM bookings",Long.class)).isZero();
+  mvc.perform(get("/api/v1/admin/calendar").with(user(a.id.toString())).param("from",java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString()).param("days","1")).andExpect(status().isOk()).andExpect(jsonPath("$.events[0].bookingId").value(id.toString())).andExpect(jsonPath("$.events[0].serviceName").value("Consulta"));
+  owner().update("UPDATE services SET price_cents=99999,name='Novo nome' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get("/api/v1/public/"+a.slug+"/bookings/"+id).cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.priceCents").value(10000)).andExpect(jsonPath("$.serviceName").value("Consulta"));
+  var other=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/bookings/"+id).cookie(other.cookie)).andExpect(status().isNotFound());
+  reserve(a,new Client(c.cookie,"0".repeat(64)),key).andExpect(status().isConflict());
+  assertThat(owner().queryForObject("SELECT pix_snapshot->>'pixKey' FROM bookings WHERE id=?",String.class,id)).isEqualTo("private@example.test");
+  for(int i=0;i<100&&delivery.deliverNext();i++){}
+  assertThat(owner().queryForObject("SELECT status FROM mail_outbox WHERE booking_id=?",String.class,id)).isEqualTo("SENT");
+ }
+ @Test void failureWritingOutboxRollsBackEveryBookingEffect()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);
+  owner().execute("ALTER TABLE mail_outbox ADD CONSTRAINT test_reject_booking_notice CHECK(booking_id IS NULL) NOT VALID");
+  try{reserve(a,c,UUID.randomUUID()).andExpect(status().isConflict());
+   for(var table:List.of("bookings","customers","booking_usage","booking_requests","calendar_allocations","booking_events"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+  }finally{owner().execute("ALTER TABLE mail_outbox DROP CONSTRAINT test_reject_booking_notice");}
+ }
+ @Test void quoteChangeCsrfAndPublicationPreventUnintendedBooking()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);
+  mvc.perform(post("/api/v1/public/"+a.slug+"/bookings").cookie(c.cookie).header("Idempotency-Key",UUID.randomUUID()).contentType("application/json").content(json.writeValueAsBytes(Map.of("quote",c.quote)))).andExpect(status().isForbidden());
+  owner().update("UPDATE services SET price_cents=12000 WHERE tenant_id=?",a.tenant);
+  reserve(a,c,UUID.randomUUID()).andExpect(status().isConflict());
+  owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);
+  reserve(a,c,UUID.randomUUID()).andExpect(status().isNotFound());
+  assertThat(owner().queryForObject("SELECT count(*) FROM bookings WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+ }
+ @Test void concurrentClaimsHaveOneWinnerAndExpirationReleasesQuota()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var first=client(a,start);var second=client(a,start);
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);var gate=new java.util.concurrent.CountDownLatch(1);
+  try{var futures=List.of(first,second).stream().map(c->pool.submit(()->{gate.await();return reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getStatus();})).toList();gate.countDown();assertThat(List.of(futures.get(0).get(),futures.get(1).get())).containsExactlyInAnyOrder(201,409);}finally{pool.shutdownNow();}
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+  bookings.expireTenant(a.tenant);bookings.expireTenant(a.tenant);
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE tenant_id=?",String.class,a.tenant)).isEqualTo("EXPIRED");
+  assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE tenant_id=?",String.class,a.tenant)).isEqualTo("RELEASED");
+  assertThat(owner().queryForObject("SELECT active FROM calendar_allocations WHERE tenant_id=?",Boolean.class,a.tenant)).isFalse();
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_events WHERE tenant_id=? AND event_type='EXPIRED'",Long.class,a.tenant)).isEqualTo(1);
+ }
+ @Test void monthlyQuotaRejectsOnlyNewRequestsAndExpiredUsageIsReleased()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);var later=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());
+  owner().update("UPDATE subscriptions SET plan_code='BASIC',status='PAID_ACTIVE',trial_started_at=NULL,trial_ends_at=NULL,paid_until=now()+interval '30 days' WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE plans SET monthly_booking_limit=1 WHERE code='BASIC'");
+  try{var key=UUID.randomUUID();reserve(a,c,key).andExpect(status().isCreated());reserve(a,c,key).andExpect(status().isCreated());reserve(a,later,UUID.randomUUID()).andExpect(status().isConflict());
+   owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=?",a.tenant);
+   reserve(a,later,UUID.randomUUID()).andExpect(status().isCreated());
+   assertThat(owner().queryForObject("SELECT count(*) FROM booking_usage WHERE tenant_id=? AND state='HELD'",Long.class,a.tenant)).isEqualTo(1);
+  }finally{owner().update("UPDATE plans SET monthly_booking_limit=NULL WHERE code='BASIC'");}
+ }
  @Test void customerEmailWorkerDeliversAndClearsSecretBody()throws Exception{
   var a=account();var start=publishAndFindStart(a);requestAccess(a,start,UUID.randomUUID()+"@example.test");
   var hash=owner().queryForObject("SELECT token_hash FROM customer_access_tokens WHERE tenant_id=?",String.class,a.tenant);
@@ -52,7 +158,7 @@ class PublicPageJourneyIT {
   assertThat(owner().queryForObject("SELECT token_hash FROM customer_access_tokens WHERE tenant_id=?",String.class,a.tenant)).doesNotContain(token);
   assertThat(runtime.queryForObject("SELECT count(*) FROM customer_access_tokens",Long.class)).isZero();
   mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isForbidden());
-  var result=mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isOk()).andExpect(jsonPath("$.email").value(email)).andExpect(jsonPath("$.priceCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.slotAvailable").value(true)).andExpect(jsonPath("$.reservationEnabled").value(false)).andReturn();
+  var result=mvc.perform(post("/api/v1/public/"+a.slug+"/access-links/consume").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("token",token)))).andExpect(status().isOk()).andExpect(jsonPath("$.email").value(email)).andExpect(jsonPath("$.priceCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.slotAvailable").value(true)).andExpect(jsonPath("$.reservationEnabled").value(true)).andReturn();
   var session=result.getResponse().getCookie("SESSION");
   mvc.perform(get("/api/v1/public/"+a.slug+"/review").cookie(session)).andExpect(status().isOk());
   mvc.perform(get("/api/v1/admin/profile").cookie(session)).andExpect(status().isUnauthorized());

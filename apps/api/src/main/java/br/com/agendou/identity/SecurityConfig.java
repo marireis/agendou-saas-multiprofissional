@@ -24,6 +24,10 @@ public class SecurityConfig {
   return http.authorizeHttpRequests(auth -> auth
     .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/pages/**").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/availability","/api/v1/public/*/review").permitAll()
+    .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/bookings/*").permitAll()
+    .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/public/*/client/bookings","/api/v1/public/*/client/bookings/*").permitAll()
+    .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/client/access-links","/api/v1/public/*/client/access-links/consume","/api/v1/public/*/client/logout").permitAll()
+    .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/bookings").permitAll()
     .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/public/*/access-links","/api/v1/public/*/access-links/consume").permitAll()
     .requestMatchers("/api/v1/auth/**", "/api/v1/health", "/error").permitAll()
     .requestMatchers("/api/v1/subscriptions/*/trial", "/api/v1/subscriptions/*/confirm-payment").denyAll()

@@ -1,0 +1,17 @@
+# ADR-0016 — Reserva temporária, idempotência e consumo mensal
+
+Data: 29/09/2026. Status: aceita.
+
+Após revisar e aceitar valores/política, cliente com email verificado solicita POST /public/{slug}/bookings com Idempotency-Key UUID e quote (hash da revisão). Serviço, início e identidade vêm da sessão verificada, nunca de tenant/cliente arbitrários no corpo. O hash da revisão inclui serviço/versionamento, valor, buffers, modalidade/local, versão PIX/política e fuso. Mudança exige nova revisão, evitando reservar com condições diferentes das aceitas.
+
+Sob o lock do tenant, a mesma transação expira solicitações vencidas, procura a chave idempotente, revalida publicação/assinatura/serviço/PIX, compara quote, verifica quota, cria Customer do email verificado (único por tenant), HOLD com GiST, Booking AWAITING_PAYMENT, snapshots imutáveis de serviço/PIX, lançamento HELD, evento REQUESTED, recibo idempotente e email na outbox. Falha em qualquer escrita desfaz tudo. SMTP é posterior ao commit e não desfaz a reserva.
+
+O prazo inicial é o do HOLD: 30 minutos. Sem confirmação de pagamento ou de atendimento nesta entrega; não se exibe chave PIX para incentivar pagamento antes de haver conferência/comprovantes. Recibo mostra protocolo, prazo, serviço e valores. GET privado por ID exige o email verificado e o mesmo slug; recibo recente na sessão permanece consultável até cinco minutos após o prazo. Não substitui a futura área Meus agendamentos nem acesso por novo dispositivo.
+
+Idempotência por tenant/email/operação, chave UUID e SHA-256 do corpo efetivo (seleção verificada/nome/quote). Mesma chave e conteúdo retorna o recibo original sem nova alocação, quota ou email; conteúdo divergente retorna 409. O recibo original não é estado atual: o cliente calcula prazo e consulta GET para o status atualizado. Retentativa já registrada funciona após bloqueio da assinatura ou retirada da página, desde que a sessão verificada ainda seja válida. Interface preserva chave no sessionStorage por revisão, sem armazenar contatos ou tokens.
+
+Quota usa mês do início do atendimento no fuso do profissional, congelado em booking_usage.month; uma reserva vale uma unidade. HELD e COMMITTED contam, RELEASED não. O limite vem do plano vigente (plans.monthly_booking_limit); null representa ilimitado, zero bloqueia novas solicitações. Checagem só acontece na criação; idempotência e consultas continuam permitidas e futura conferência de pagamento não deve reaplicar esse bloqueio. Valores comerciais são configuráveis, sem constantes no serviço.
+
+Expiração é sincronizada antes de criar/consultar e por worker periódico de transações por tenant: estado EXPIRED, alocação inativa, quota RELEASED e evento único, sem apagar histórico. Mesmo antes do worker, o gerador ignora HOLD vencido. Worker usa o mesmo lock; falha é tentada novamente no próximo ciclo. MVP-056 ainda deverá ampliar operação de lotes/leases e integrar os futuros estados de pagamento.
+
+V013 adiciona clientes, reservas, lançamentos, recibos e eventos com FORCE RLS e FKs compostas. Runtime não pode editar snapshots nem recibos, apenas estado de reserva/consumo. A outbox tem finalidade BOOKING_REQUEST e mensagem única por reserva; função mínima valida vigência sem expor dados pessoais ao dispatcher. Página geral nunca retorna snapshots PIX. Futuras transições (EmConferencia/Confirmada/etc.) exigirão migration e coordenação própria; a constraint atual aceita apenas AWAITING_PAYMENT/EXPIRED.

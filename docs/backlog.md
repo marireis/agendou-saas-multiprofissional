@@ -81,11 +81,11 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 - [x] **MVP-050:** fluxo público serviço → data → horário → nome/email → verificação → revisão, com disponibilidade real. Não cria reserva até MVP-052/053/054.
 - [x] **MVP-051:** token de uso único com hash, validade de 15 min, respostas genéricas, reenvio/revogação, outbox e sessão de revisão restrita ao slug. V012/ADR-0015.
-- [ ] **MVP-052:** criar reserva temporaria, snapshots, alocacao, quota provisoria e outbox na mesma transacao.
-- [ ] **MVP-053:** implementar idempotencia por tenant/ator/operacao e hash do corpo.
-- [ ] **MVP-054:** implementar quota mensal e provisoria conforme plano vigente, sem descartar recebimento por limite.
+- [x] **MVP-052:** reserva temporária, snapshots, alocação, quota provisória e outbox na mesma transação (V013, ADR-0016).
+- [x] **MVP-053:** idempotência por tenant/ator/operação e hash da seleção/revisão; repetição devolve recibo original, conteúdo divergente retorna 409.
+- [ ] **MVP-054 (mecanismo implementado):** quota mensal/provisória pelo plano vigente, liberada na expiração. Falta definir números comerciais (atualmente null = ilimitado); futura conferência não deve bloquear recebimento por limite.
 - [ ] **MVP-055:** criar area `Meus agendamentos` com detalhe, estado e prazo de expiracao.
-- [ ] **MVP-056:** worker de expiracao de reservas com leases, retries e limpeza sincronica antes de nova reserva.
+- [ ] **MVP-056 (parcial):** expiração síncrona e worker básico implementados, liberando alocação/quota. Faltam lotes/leases e integração dos futuros estados de pagamento.
 
 **Saida:** cliente recebe reserva `AguardandoPagamento`, horario bloqueado temporariamente e consulta segura.
 

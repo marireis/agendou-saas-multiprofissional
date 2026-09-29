@@ -1,13 +1,122 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.15.0
+  version: 0.17.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /public/{slug}/client/access-links:
+    post:
+      security: []
+      summary: Solicitar acesso a Meus agendamentos por email
+      description: Resposta genérica, CSRF e limites por email/conexão. Só envia para cliente existente; funciona com página retirada ou assinatura bloqueada. Reenvio revoga link anterior do mesmo tenant/email.
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+      responses:
+        '202': {description: Resposta genérica sem confirmar existência de cliente ou profissional}
+        '403': {description: CSRF inválido}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /public/{slug}/client/access-links/consume:
+    post:
+      security: []
+      summary: Consumir link único de 15 minutos e abrir sessão de cliente por uma hora
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+                token: {type: string, maxLength: 128}
+      responses:
+        '200': {description: Cookie de sessão rotacionado, acesso restrito ao slug/email e sem privilégios administrativos}
+        '400': {description: Link inválido, expirado, revogado ou de outro escopo}
+        '403': {description: CSRF inválido}
+  /public/{slug}/client/bookings:
+    get:
+      summary: Listar somente as reservas do cliente verificado
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 10000, default: 0}}
+      responses:
+        '200': {description: 'No-store. items (até 20 recibos), hasMore, offset e email. Ordenação por início decrescente e ID. Expira reservas vencidas antes de consultar; não expõe PIX.'}
+        '400': {description: Offset inválido}
+        '401': {description: Sessão de cliente ausente, expirada ou de outro slug}
+  /public/{slug}/client/bookings/{id}:
+    get:
+      summary: Detalhe autorizado com valores e política preservados, modalidade/local e histórico
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'No-store. Recibo mais businessName, serviceMode, location, cancellationPolicy e events (type/at). Sem chave PIX ou dados de terceiros.'}
+        '401': {description: Sessão de cliente ausente ou expirada}
+        '404': {description: Reserva inexistente ou de outro cliente}
+  /public/{slug}/client/logout:
+    post:
+      summary: Encerrar acessos de cliente e revisão nesta sessão, preservando login administrativo
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Acessos de cliente removidos, no-store}
+        '403': {description: CSRF inválido}
+  /public/{slug}/bookings:
+    post:
+      summary: Criar reserva temporária com sessão de email verificado, CSRF e idempotência
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quote]
+              properties:
+                quote: {type: string, pattern: '^[a-f0-9]{64}$', description: Hash retornado pela revisão aceita pelo cliente}
+      responses:
+        '201': {description: Recibo da criação com id/status/start/end/expiresAt/timezone/serviceName/priceCents/depositCents/paymentAvailable=false; mesma chave/corpo repete recibo original sem novo efeito. no-store}
+        '400': {description: Cabeçalho ou corpo malformado}
+        '401': {description: Sessão de revisão ausente, expirada ou de outro slug}
+        '403': {description: CSRF inválido ou assinatura bloqueada para nova reserva}
+        '404': {description: Página indisponível}
+        '409': {description: Horário ocupado, quota atingida, condições alteradas ou chave reutilizada com outra solicitação}
+        '429': {description: Limite por conexão}
+  /public/{slug}/bookings/current:
+    get:
+      summary: Recibo recente do próprio cliente na sessão; não é listagem de reservas
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Recibo com estado atual e no-store; acesso até cinco minutos após o prazo}
+        '404': {description: Recibo ausente ou acesso expirado}
+  /public/{slug}/bookings/{id}:
+    get:
+      summary: Consultar solicitação do mesmo email/tenant na sessão verificada
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Recibo atualizado sem snapshots PIX; leitura preservada após bloqueio/retirada}
+        '401': {description: Sessão verificada ausente ou expirada}
+        '404': {description: Solicitação ausente ou de outro cliente}
   /public/{slug}/availability:
     get:
       security: []
@@ -18,7 +127,7 @@ paths:
         - {name: date, in: query, schema: {type: string, format: date}}
       responses:
         '200':
-          description: Sem cache; 60 dias com date/available, slots start/end apenas da data solicitada, today, timezone e reservationEnabled=false. Nenhuma ocupação privada.
+          description: Sem cache; 60 dias com date/available, slots start/end apenas da data solicitada, today, timezone e reservationEnabled=true. Nenhuma ocupação privada.
         '404': {description: Página não publicada ou serviço indisponível/externo}
         '403': {description: Assinatura não operacional}
         '422': {description: Data fora do horizonte}
@@ -63,7 +172,7 @@ paths:
               properties:
                 token: {type: string, minLength: 1, maxLength: 128}
       responses:
-        '200': {description: Revisão privada com nome/email, serviço, início/fim/fuso, preço/entrada atuais em centavos, slotAvailable e reservationEnabled=false; no-store}
+        '200': {description: 'Revisão privada com nome/email, serviço, início/fim/fuso, preço/entrada atuais em centavos, slotAvailable, reservationEnabled=true, cancellationPolicy e quote (SHA-256 das condições atuais); no-store'}
         '400': {description: Link inválido, expirado, de outro tenant ou já consumido}
         '403': {description: CSRF inválido ou assinatura bloqueada}
         '404': {description: Página/serviço indisponível}
@@ -118,6 +227,8 @@ paths:
                       properties:
                         id: {type: string, format: uuid}
                         kind: {type: string, enum: [BLOCK, HOLD]}
+                        bookingId: {type: [string, 'null'], format: uuid, description: Reserva temporária vinculada à alocação}
+                        serviceName: {type: [string, 'null'], description: Nome preservado no snapshot da reserva}
                         start: {type: string, format: date-time}
                         end: {type: string, format: date-time}
                         protectedStart: {type: string, format: date-time}
