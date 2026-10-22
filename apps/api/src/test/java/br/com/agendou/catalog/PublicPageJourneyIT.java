@@ -18,7 +18,7 @@ import org.testcontainers.junit.jupiter.*;
 
 @SpringBootTest(properties={"agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000","agendou.booking-expiration-delay=3600000"})
 @AutoConfigureMockMvc @Testcontainers
-class PublicPageJourneyIT {
+class PublicPageJourneyIT extends br.com.agendou.support.IsolatedSpringIntegrationTest {
  String reissueBody(int version)throws Exception{return json.writeValueAsString(Map.of("expectedVersion",version,"reason","Cliente verificado perdeu o codigo","identityVerified",true));}
  @Test void reissuedCodeRevokesOldCodePortalReceiptAndPrivateFiles()throws Exception{
   var a=account();String start=publishAndFindStart(a);var bookingSession=phoneSession(a,start,"11999990000");UUID key=UUID.randomUUID();var booking=phoneReserve(a,bookingSession,key);String id=booking.get("id").asText(),oldCode=booking.get("accessCode").asText(),portal="/api/v1/public/"+a.slug+"/client",path="/api/v1/admin/bookings/"+id+"/access-code";

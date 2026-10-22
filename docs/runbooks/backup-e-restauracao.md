@@ -33,4 +33,13 @@ O tempo medido de restauração inclui inicialização dos destinos e verificaç
 5. Restaurar primeiro em destino vazio isolado, com bucket privado, emails e workers bloqueados. Validar checksums, contagens, vínculos de cada comprovante com pagamento/reserva, RLS e autenticação/MFA antes de liberar tráfego.
 6. Realizar uma jornada completa na API restaurada, inclusive recibo/código, comprovante e conferência. Registrar tempo total até serviço utilizável e ponto efetivamente recuperado. Somente depois planejar troca de tráfego e rollback.
 
-**Pendente:** backup automatizado operacional, inventário completo, recuperação de segredos, vínculo reserva/comprovante e jornada da API restaurada, cópia externa, carga representativa e recuperação de produção. MVP-073 permanece parcial.
+**Pendente:** backup automatizado operacional, inventário em escala real, recuperação de segredos, cópia externa, carga representativa e recuperação de produção. O vínculo reserva/comprovante e a jornada da API restaurada são cobertos pelo ensaio sintético da segunda etapa abaixo. MVP-073 permanece parcial.
+
+
+## Segunda etapa: reserva e comprovante na API restaurada
+
+`BookingRecoveryIT` complementa o ensaio de infraestrutura. Cria dois profissionais sintéticos, publica uma página, reserva sem email e envia PNG por HTTP para MinIO real. Encerra a aplicação de origem antes do snapshot. O inventário JSON vem de `payment_evidence`, com chave, tipo, tamanho e SHA-256, e é relido do disco para restauração. Testa detecção de ausência/corrupção antes de aceitar o arquivo.
+
+Após `pg_restore`, inicia outra aplicação apontando para banco e MinIO restaurados. Um cliente HTTP novo obtém CSRF e sessão, tem código incorreto recusado, autentica com o código original, consulta a reserva e baixa o comprovante vinculado. Download anônimo e consulta por outro profissional são recusados. O registro de recebimento pelo profissional confirma a reserva e compromete a quota, com consulta posterior do pagamento por HTTP. As ações administrativas usam MockMvc e identidade sintética; não se trata de teste de interface nem transferência real.
+
+Executar na pasta `apps/api`: `.\mvnw.cmd '-Dit.test=BookingRecoveryIT' verify`. O relatório `target/booking-recovery-report.txt` mede backup e recuperação incluindo inicialização da aplicação e verificações. Credenciais, nomes e contatos são sintéticos; os volumes locais continuam intocados. Não comprova restauração de segredos/MFA ou RPO/RTO de produção.

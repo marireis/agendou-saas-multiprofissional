@@ -20,7 +20,7 @@ import org.testcontainers.junit.jupiter.*;
 
 @SpringBootTest(properties={"agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000"})
 @AutoConfigureMockMvc @Testcontainers
-class PaymentSettingsJourneyIT {
+class PaymentSettingsJourneyIT extends br.com.agendou.support.IsolatedSpringIntegrationTest {
  @Container static PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:17").withUsername("agendou_app").withPassword("agendou_app");
  @DynamicPropertySource static void database(DynamicPropertyRegistry p){p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.flyway.url",postgres::getJdbcUrl);}
  @Autowired MockMvc mvc;@Autowired AuthService auth;@Autowired ObjectMapper json;@Autowired JdbcTemplate runtime;

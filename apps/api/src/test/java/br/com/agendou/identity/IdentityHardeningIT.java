@@ -39,7 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 })
 @AutoConfigureMockMvc
 @Testcontainers
-class IdentityHardeningIT {
+class IdentityHardeningIT extends br.com.agendou.support.IsolatedSpringIntegrationTest {
     @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")
             .withUsername("agendou_app").withPassword("agendou_app");
 

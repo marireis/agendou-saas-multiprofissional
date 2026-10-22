@@ -37,7 +37,7 @@ class BookingRecoveryIT {
     bookingId=booking.get("id").asText();code=booking.get("accessCode").asText();
     var client=client();String base=base(app),portal="/api/v1/public/"+account.slug()+"/client";
     assertThat(postJson(client,base,portal+"/code",fixture.json.writeValueAsString(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",code))).statusCode()).isEqualTo(200);
-    var csrf=csrf(client,base);
+    var csrf=csrfToken(client,base);
     var upload=client.send(HttpRequest.newBuilder(URI.create(base+portal+"/bookings/"+bookingId+"/evidence"))
       .header(csrf.get("headerName").asText(),csrf.get("token").asText()).header("Content-Type","application/octet-stream")
       .POST(HttpRequest.BodyPublishers.ofByteArray(image)).build(),HttpResponse.BodyHandlers.ofString());
@@ -74,21 +74,21 @@ class BookingRecoveryIT {
     var fixture=new RecoveryJourneyFixture(app,destination);
     String base=base(app),portal="/api/v1/public/"+account.slug()+"/client",payment="/api/v1/admin/payment-reviews/"+bookingId;
     var client=client();
-    assertThat(get(client,base,"/api/v1/health").statusCode()).isEqualTo(200);
+    assertThat(httpGet(client,base,"/api/v1/health").statusCode()).isEqualTo(200);
     assertThat(postJson(client,base,portal+"/code",json.writeValueAsString(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code","A".repeat(43)))).statusCode()).isEqualTo(400);
     assertThat(postJson(client,base,portal+"/code",json.writeValueAsString(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",code))).statusCode()).isEqualTo(200);
-    var detail=get(client,base,portal+"/bookings/"+bookingId);assertThat(detail.statusCode()).isEqualTo(200);
+    var detail=httpGet(client,base,portal+"/bookings/"+bookingId);assertThat(detail.statusCode()).isEqualTo(200);
     assertThat(json.readTree(detail.body()).get("status").asText()).isEqualTo("IN_REVIEW");
     var download=client.send(HttpRequest.newBuilder(URI.create(base+portal+"/bookings/"+bookingId+"/evidence/"+evidenceId)).GET().build(),HttpResponse.BodyHandlers.ofByteArray());
     assertThat(download.statusCode()).isEqualTo(200);assertThat(download.body()).isEqualTo(image);
     assertThat(download.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
-    assertThat(get(client(),base,portal+"/bookings/"+bookingId+"/evidence/"+evidenceId).statusCode()).isNotEqualTo(200);
+    assertThat(httpGet(client(),base,portal+"/bookings/"+bookingId+"/evidence/"+evidenceId).statusCode()).isNotEqualTo(200);
     var entry=manifest.getFirst();
-    assertThat(get(client(),endpoint(destinationFiles),"/recovery-private/"+entry.key()).statusCode()).isIn(401,403);
+    assertThat(httpGet(client(),endpoint(destinationFiles),"/recovery-private/"+entry.key()).statusCode()).isIn(401,403);
     fixture.mvc.perform(get(payment).with(user(other.id().toString()))).andExpect(status().isNotFound());
     fixture.mvc.perform(post(payment+"/receipts").with(user(account.id().toString())).with(csrf()).contentType("application/json").content(fixture.receiptBody(5000,"recovery-receipt")))
       .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED"));
-    var paid=get(client,base,portal+"/bookings/"+bookingId+"/payment");assertThat(paid.statusCode()).isEqualTo(200);
+    var paid=httpGet(client,base,portal+"/bookings/"+bookingId+"/payment");assertThat(paid.statusCode()).isEqualTo(200);
     assertThat(json.readTree(paid.body()).get("receivedCents").asLong()).isEqualTo(5000);
     assertThat(fixture.owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,UUID.fromString(bookingId))).isEqualTo("COMMITTED");
     Files.writeString(Path.of("target/booking-recovery-report.txt"),"PASS at "+java.time.Instant.now()+"\nBackup ms: "+backupMs+"\nRestore, application startup and journey ms: "+elapsed(recoveryStarted)
@@ -99,10 +99,10 @@ class BookingRecoveryIT {
  private static void verify(FileEntry entry,byte[] bytes)throws Exception{assertThat(bytes.length).isEqualTo(entry.size());assertThat(sha256(bytes)).isEqualTo(entry.digest());}
  private static HttpClient client(){return HttpClient.newBuilder().cookieHandler(new CookieManager(null,CookiePolicy.ACCEPT_ALL)).build();}
  private static String base(ServletWebServerApplicationContext app){return "http://localhost:"+app.getWebServer().getPort();}
- private static HttpResponse<String> get(HttpClient client,String base,String path)throws Exception{return client.send(HttpRequest.newBuilder(URI.create(base+path)).GET().build(),HttpResponse.BodyHandlers.ofString());}
- private static com.fasterxml.jackson.databind.JsonNode csrf(HttpClient client,String base)throws Exception{return new com.fasterxml.jackson.databind.ObjectMapper().readTree(get(client,base,"/api/v1/auth/csrf").body());}
+ private static HttpResponse<String> httpGet(HttpClient client,String base,String path)throws Exception{return client.send(HttpRequest.newBuilder(URI.create(base+path)).GET().build(),HttpResponse.BodyHandlers.ofString());}
+ private static com.fasterxml.jackson.databind.JsonNode csrfToken(HttpClient client,String base)throws Exception{return new com.fasterxml.jackson.databind.ObjectMapper().readTree(httpGet(client,base,"/api/v1/auth/csrf").body());}
  private static HttpResponse<String> postJson(HttpClient client,String base,String path,String body)throws Exception{
-  var csrf=csrf(client,base);return client.send(HttpRequest.newBuilder(URI.create(base+path)).header(csrf.get("headerName").asText(),csrf.get("token").asText()).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),HttpResponse.BodyHandlers.ofString());
+  var csrf=csrfToken(client,base);return client.send(HttpRequest.newBuilder(URI.create(base+path)).header(csrf.get("headerName").asText(),csrf.get("token").asText()).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),HttpResponse.BodyHandlers.ofString());
  }
  private static ServletWebServerApplicationContext start(PostgreSQLContainer<?> db,GenericContainer<?> files){
   return (ServletWebServerApplicationContext)new SpringApplicationBuilder(br.com.agendou.ApiApplication.class).run(

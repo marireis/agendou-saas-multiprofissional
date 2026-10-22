@@ -102,3 +102,12 @@
 ## Ensaio de recuperação — 22/10/2026
 
 `BackupRestoreIT` aprovado: esquema completo até V026, dois tenants, um cliente, dump PostgreSQL e um PNG privado restaurados em contêineres isolados. Verifica Flyway, RLS, permissões runtime, hashes e recusa de acesso anônimo; simula perda de uma gravação após o snapshot. Mesmo cenário executado por Surefire e Failsafe, sem falhas (um teste distinto). Log `apps/api/backup-restore-verify.log`; medição no `target/backup-restore-report.txt`: backup 341 ms, recuperação de infraestrutura/verificações 4.003 ms. Não inclui aplicação restaurada, vínculo reserva/comprovante, segredos ou volume realista. MVP-073 parcial; procedimento e próximos critérios em [backup e restauração](runbooks/backup-e-restauracao.md).
+
+
+## Regressão integrada e recuperação de reserva — 22/10/2026
+
+Resultado final: **144 testes distintos aprovados**, 36 unitários e 108 integrações, sem falhas/erros/ignorados; `apps/api/integration-regression-final.log`, BUILD SUCCESS às 19:45. `BookingRecoveryIT` restaura banco e inventário de comprovantes, inicia outra API e verifica código/sessão/download por HTTP e confirmação administrativa por MockMvc, com PostgreSQL/MinIO reais. Dados sintéticos: dois tenants, uma reserva e um comprovante vinculado. Backup 370 ms; recuperação, inicialização e jornada 9.074 ms. Não é medição de produção.
+
+`@DirtiesContext(AFTER_CLASS)` nas jornadas fecha recursos pelo ciclo do Spring. A regressão final não repetiu os erros de tarefas em bancos removidos nem o término forçado da JVM. Uma tentativa intermediária de fechar o contexto manualmente foi interrompida por conflito com callbacks e corrigida; não conta como execução aprovada.
+
+TypeScript e sete verificações HTTP locais também passaram (`apps/web/integration-typecheck.log`, `.local/integration-http-check.log`). Build frontend não reexecutado; E2E visual/teclado/leitor/carga continuam pendentes. Consultar a [matriz de testes](matriz-testes-automatizados.md) para cobertura e limites. Próximo incremento: automação de navegador para as jornadas principais.

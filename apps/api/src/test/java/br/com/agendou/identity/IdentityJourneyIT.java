@@ -24,7 +24,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @SpringBootTest(properties={"agendou.mail-worker-delay=3600000","agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000"})
 @AutoConfigureMockMvc
 @Testcontainers
-class IdentityJourneyIT {
+class IdentityJourneyIT extends br.com.agendou.support.IsolatedSpringIntegrationTest {
  @Container static PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:17").withUsername("agendou_app").withPassword("agendou_app");
  @DynamicPropertySource static void database(DynamicPropertyRegistry properties) {
   properties.add("spring.datasource.url",postgres::getJdbcUrl);
