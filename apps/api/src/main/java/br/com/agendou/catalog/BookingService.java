@@ -16,8 +16,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class BookingService {
- private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;private final PaymentProvider payments;
- public BookingService(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock,PaymentProvider payments){this.payments=payments;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;}
+ private final JdbcTemplate jdbc;private final TenantSessionConfigurer tenants;private final SubscriptionService subscriptions;private final CalendarService calendar;private final ObjectMapper json;private final Clock clock;private final PaymentProvider payments;private final EvidenceStorage evidenceStorage;
+ public BookingService(JdbcTemplate jdbc,TenantSessionConfigurer tenants,SubscriptionService subscriptions,CalendarService calendar,ObjectMapper json,Clock clock,PaymentProvider payments,EvidenceStorage evidenceStorage){this.evidenceStorage=evidenceStorage;this.payments=payments;this.jdbc=jdbc;this.tenants=tenants;this.subscriptions=subscriptions;this.calendar=calendar;this.json=json;this.clock=clock;}
  record Quote(String service,String pix,int paymentVersion,long price,long deposit,String timezone,String fingerprint){}
  private Quote currentQuote(UUID id)throws Exception{
   var rows=jdbc.query("""
@@ -40,13 +40,34 @@ public class BookingService {
  }
  public Map<String,Object> reviewQuote(UUID serviceId)throws Exception{var quote=currentQuote(serviceId);return Map.of("quote",quote.fingerprint(),"cancellationPolicy",json.readTree(quote.pix()).get("cancellationPolicy").asText());}
  private void bind(CustomerJourneyController.Verified actor){bind(actor.slug(),actor.email());}
- private void bind(String slug,String email){UUID tenant=jdbc.queryForObject("SELECT public.resolve_customer_tenant(?,?)",UUID.class,slug,email);if(tenant==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Página indisponível.");TenantContext.set(tenant);tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);}
+ private void bind(String slug,String email){UUID tenant=email.startsWith("code:")?jdbc.queryForObject("SELECT public.resolve_booking_code_tenant(?,?)",UUID.class,slug,email.substring(5)):jdbc.queryForObject("SELECT public.resolve_customer_tenant(?,?)",UUID.class,slug,email);if(tenant==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Página indisponível.");TenantContext.set(tenant);tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);}
+ record BookingInput(UUID serviceId,Instant start,String name,String email,UUID customerId,String phone,String code){
+  BookingInput(UUID serviceId,Instant start,String name,String email){this(serviceId,start,name,email,null,"",null);}
+  String identity(){return code==null?email:"code:"+CustomerContact.hash(code);}
+ }
+ @Transactional(rollbackFor=Exception.class) public Map<String,Object> createPhone(String slug,UUID service,Instant start,String name,String phone,String code,UUID key,String quote)throws Exception{
+  try{UUID tenant=jdbc.queryForObject("SELECT public.resolve_booking_tenant(?)",UUID.class,slug);if(tenant==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Página indisponível.");TenantContext.set(tenant);tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);
+   String nameKey=CustomerContact.key(name);UUID id=UUID.randomUUID();jdbc.update("INSERT INTO customers(id,tenant_id,name,phone,contact_name_key) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING",id,tenant,name,phone,nameKey);
+   id=jdbc.queryForObject("SELECT id FROM customers WHERE tenant_id=? AND email IS NULL AND phone=? AND contact_name_key=?",UUID.class,tenant,phone,nameKey);
+   return createLocked(new BookingInput(service,start,name,null,id,phone,code),key,quote,null);
+  }finally{TenantContext.clear();}
+ }
  @Transactional(rollbackFor=Exception.class) public Map<String,Object> create(CustomerJourneyController.Verified actor,UUID key,String acceptedQuote)throws Exception{
-  try{bind(actor);var tenant=TenantContext.require();expireCurrent();String requestHash=hash(actor.serviceId()+"\n"+actor.start()+"\n"+actor.name()+"\n"+acceptedQuote);
-   var previous=jdbc.query("SELECT request_hash,response::text FROM booking_requests WHERE tenant_id=? AND actor_email=? AND request_key=?",(r,n)->new String[]{r.getString(1),r.getString(2)},tenant,actor.email(),key);
+  try{bind(actor);return createLocked(new BookingInput(actor.serviceId(),actor.start(),actor.name(),actor.email()),key,acceptedQuote,null);}finally{TenantContext.clear();}
+ }
+ @Transactional(rollbackFor=Exception.class) public Map<String,Object> createAssisted(UUID customerId,UUID serviceId,Instant start,UUID key,String acceptedQuote,UUID operator,String code)throws Exception{
+  tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,TenantContext.require());subscriptions.requireOperational(TenantContext.require());
+  var rows=jdbc.query("SELECT name,email,phone FROM customers WHERE tenant_id=? AND id=?",(r,n)->new String[]{r.getString(1),r.getString(2),r.getString(3)},TenantContext.require(),customerId);if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Cliente não encontrado.");var customer=rows.getFirst();if(customer[1]==null){String phone=CustomerContact.phone(customer[2]);var result=new LinkedHashMap<>(createLocked(new BookingInput(serviceId,start,customer[0],null,customerId,phone,code),key,acceptedQuote,operator));
+   String stored=jdbc.queryForObject("SELECT code_hash FROM booking_access_codes WHERE tenant_id=? AND booking_id=?",String.class,TenantContext.require(),UUID.fromString(result.get("id").toString()));if(stored.equals(CustomerContact.hash(code)))result.put("accessCode",code);return result;}
+  return createLocked(new BookingInput(serviceId,start,customer[0],customer[1]),key,acceptedQuote,operator);
+ }
+ public Map<String,Object> assistedQuote(UUID serviceId)throws Exception{var quote=currentQuote(serviceId);return Map.of("quote",quote.fingerprint(),"priceCents",quote.price(),"depositCents",quote.deposit(),"timezone",quote.timezone(),"cancellationPolicy",json.readTree(quote.pix()).get("cancellationPolicy").asText());}
+ private Map<String,Object> createLocked(BookingInput actor,UUID key,String acceptedQuote,UUID operator)throws Exception{
+  var tenant=TenantContext.require();expireCurrent();String requestActor=operator==null?actor.identity():"admin:"+operator;String requestHash=hash(actor.serviceId()+"\n"+actor.start()+"\n"+actor.name()+"\n"+acceptedQuote+(operator==null?"":"\n"+(actor.customerId()==null?actor.email():actor.customerId()))+(actor.code()==null?"":"\n"+actor.phone()));
+   var previous=jdbc.query("SELECT request_hash,response::text FROM booking_requests WHERE tenant_id=? AND actor_email=? AND request_key=?",(r,n)->new String[]{r.getString(1),r.getString(2)},tenant,requestActor,key);
    if(!previous.isEmpty()){if(!previous.getFirst()[0].equals(requestHash))throw conflict("Esta chave já foi usada com outra solicitação.");return json.readValue(previous.getFirst()[1],new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}
    var subscription=subscriptions.current(tenant);subscriptions.requireOperational(tenant);
-   if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT published FROM public_profiles WHERE tenant_id=?",Boolean.class,tenant)))throw conflict("A página não está disponível para novas reservas.");
+   if(operator==null&&!Boolean.TRUE.equals(jdbc.queryForObject("SELECT published FROM public_profiles WHERE tenant_id=?",Boolean.class,tenant)))throw conflict("A página não está disponível para novas reservas.");
    var quote=currentQuote(actor.serviceId());if(!quote.fingerprint().equals(acceptedQuote))throw conflict("Os valores ou as condições mudaram. Atualize a revisão antes de solicitar.");
    var month=actor.start().atZone(ZoneId.of(quote.timezone())).toLocalDate().withDayOfMonth(1);
    Integer limit=jdbc.queryForObject("SELECT monthly_booking_limit FROM plans WHERE code=?",Integer.class,subscription.planCode().name());
@@ -55,36 +76,37 @@ public class BookingService {
    UUID allocation=calendar.hold(actor.serviceId(),actor.start());
    var span=jdbc.queryForMap("SELECT ends_at,expires_at FROM calendar_allocations WHERE tenant_id=? AND id=?",tenant,allocation);
    Instant end=((Timestamp)span.get("ends_at")).toInstant(),expires=((Timestamp)span.get("expires_at")).toInstant();
-   UUID customer=UUID.randomUUID();jdbc.update("INSERT INTO customers(id,tenant_id,email,name) VALUES (?,?,?,?) ON CONFLICT(tenant_id,email) DO NOTHING",customer,tenant,actor.email(),actor.name());
-   customer=jdbc.queryForObject("SELECT id FROM customers WHERE tenant_id=? AND email=?",UUID.class,tenant,actor.email());UUID booking=UUID.randomUUID();
+   UUID customer=actor.customerId();if(customer==null){customer=UUID.randomUUID();jdbc.update("INSERT INTO customers(id,tenant_id,email,name) VALUES (?,?,?,?) ON CONFLICT(tenant_id,email) DO NOTHING",customer,tenant,actor.email(),actor.name());
+   customer=jdbc.queryForObject("SELECT id FROM customers WHERE tenant_id=? AND email=?",UUID.class,tenant,actor.email());}UUID booking=UUID.randomUUID();
    jdbc.update("""
-    INSERT INTO bookings(id,tenant_id,customer_id,service_id,allocation_id,status,starts_at,ends_at,expires_at,timezone,service_snapshot,pix_snapshot,price_cents,deposit_cents,payment_version)
-    VALUES (?,?,?,?,?,'AWAITING_PAYMENT',?,?,?,?,?::jsonb,?::jsonb,?,?,?)
-    """,booking,tenant,customer,actor.serviceId(),allocation,Timestamp.from(actor.start()),Timestamp.from(end),Timestamp.from(expires),quote.timezone(),quote.service(),quote.pix(),quote.price(),quote.deposit(),quote.paymentVersion());
+    INSERT INTO bookings(id,tenant_id,customer_id,service_id,allocation_id,status,starts_at,ends_at,expires_at,timezone,service_snapshot,pix_snapshot,price_cents,deposit_cents,payment_version,created_at)
+    VALUES (?,?,?,?,?,'AWAITING_PAYMENT',?,?,?,?,?::jsonb,?::jsonb,?,?,?,?)
+    """,booking,tenant,customer,actor.serviceId(),allocation,Timestamp.from(actor.start()),Timestamp.from(end),Timestamp.from(expires),quote.timezone(),quote.service(),quote.pix(),quote.price(),quote.deposit(),quote.paymentVersion(),Timestamp.from(clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS)));
    jdbc.update("INSERT INTO payment_intents(id,tenant_id,booking_id,provider,status,amount_due_cents,deadline_at) VALUES (?,?,?,'MANUAL_PIX','AWAITING_PAYMENT',?,?)",UUID.randomUUID(),tenant,booking,quote.deposit(),Timestamp.from(expires));
    jdbc.update("INSERT INTO booking_usage(tenant_id,booking_id,month,state) VALUES (?,?,?,'HELD')",tenant,booking,java.sql.Date.valueOf(month));
    jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'REQUESTED')",UUID.randomUUID(),tenant,booking);
-   var response=receipt(booking,actor.email());
-   jdbc.update("INSERT INTO booking_requests(tenant_id,actor_email,request_key,request_hash,booking_id,response) VALUES (?,?,?,?,?,?::jsonb)",tenant,actor.email(),key,requestHash,booking,json.writeValueAsString(response));
-   jdbc.update("""
+   if(actor.code()!=null)jdbc.update("INSERT INTO booking_access_codes(code_hash,tenant_id,booking_id,name_key,phone) VALUES (?,?,?,?,?)",CustomerContact.hash(actor.code()),tenant,booking,CustomerContact.key(actor.name()),actor.phone());
+   var response=receipt(booking,actor.identity());
+   jdbc.update("INSERT INTO booking_requests(tenant_id,actor_email,request_key,request_hash,booking_id,response) VALUES (?,?,?,?,?,?::jsonb)",tenant,requestActor,key,requestHash,booking,json.writeValueAsString(response));
+   if(operator==null&&actor.email()!=null)jdbc.update("""
     INSERT INTO mail_outbox(id,recipient,subject,body,purpose,booking_id,expires_at,created_at,next_attempt_at)
     VALUES (?,?,?,?,'BOOKING_REQUEST',?,?,?,?)
-    """,UUID.randomUUID(),actor.email(),"Agendou: solicitação registrada","Sua solicitação "+booking+" foi registrada. O horário fica ocupado temporariamente até "+expires.atZone(ZoneId.of(quote.timezone()))+". Não é atendimento confirmado. A etapa de pagamento online ainda não está habilitada; não faça transferência por esta mensagem.",booking,Timestamp.from(expires),Timestamp.from(clock.instant()),Timestamp.from(clock.instant()));
+    """,UUID.randomUUID(),actor.email(),"Agendou: solicitação registrada","Sua solicitação "+booking+" foi registrada. O horário fica ocupado temporariamente até "+expires.atZone(ZoneId.of(quote.timezone()))+". Não é atendimento confirmado. Consulte os dados PIX e envie o comprovante na área Meus agendamentos. A confirmação depende da conferência do profissional.",booking,Timestamp.from(expires),Timestamp.from(clock.instant()),Timestamp.from(clock.instant()));
+   if(operator!=null){jdbc.update("INSERT INTO assisted_bookings(tenant_id,booking_id,recorded_by) VALUES (?,?,?)",tenant,booking,operator);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'ASSISTED_REQUESTED')",UUID.randomUUID(),tenant,booking);}
    return response;
-  }finally{TenantContext.clear();}
  }
  @Transactional public Map<String,Object> get(CustomerJourneyController.Verified actor,UUID id){try{bind(actor);expireCurrent();return receipt(id,actor.email());}finally{TenantContext.clear();}}
  @Transactional public Map<String,Object> listForCustomer(String slug,String email,int offset){
   try{bind(slug,email);expireCurrent();
-   var ids=jdbc.query("SELECT b.id FROM bookings b JOIN customers c ON c.tenant_id=b.tenant_id AND c.id=b.customer_id WHERE b.tenant_id=? AND c.email=? ORDER BY b.starts_at DESC,b.id DESC LIMIT 21 OFFSET ?",(r,n)->r.getObject(1,UUID.class),TenantContext.require(),email,offset);
+   var ids=jdbc.query("SELECT b.id FROM bookings b JOIN customers c ON c.tenant_id=b.tenant_id AND c.id=b.customer_id WHERE b.tenant_id=? AND (c.email=? OR EXISTS(SELECT 1 FROM booking_access_codes a WHERE a.tenant_id=b.tenant_id AND a.booking_id=b.id AND 'code:'||a.code_hash=?)) ORDER BY b.starts_at DESC,b.id DESC LIMIT 21 OFFSET ?",(r,n)->r.getObject(1,UUID.class),TenantContext.require(),email,email,offset);
    var items=ids.stream().limit(20).map(id->receipt(id,email)).toList();
-   return Map.of("items",items,"hasMore",ids.size()>20,"offset",offset,"email",email);
+   return Map.of("items",items,"hasMore",ids.size()>20,"offset",offset,"email",email.startsWith("code:")?"Acesso privado à reserva":email);
   }finally{TenantContext.clear();}
  }
  @Transactional public Map<String,Object> detailForCustomer(String slug,String email,UUID id){
   try{bind(slug,email);expireCurrent();var result=receipt(id,email);
    var details=jdbc.queryForMap("SELECT service_snapshot->>'businessName' AS business_name,service_snapshot->>'serviceMode' AS service_mode,service_snapshot->>'location' AS location,pix_snapshot->>'cancellationPolicy' AS cancellation_policy FROM bookings WHERE tenant_id=? AND id=?",TenantContext.require(),id);
-   result.put("businessName",details.get("business_name"));result.put("serviceMode",details.get("service_mode"));result.put("location",details.get("location"));result.put("cancellationPolicy",details.get("cancellation_policy"));
+   BookingOutcomeController.add(jdbc,id,result);result.put("reschedules",BookingRescheduleController.history(jdbc,id));result.put("businessName",details.get("business_name"));result.put("serviceMode",details.get("service_mode"));result.put("location",details.get("location"));result.put("cancellationPolicy",details.get("cancellation_policy"));
    result.put("events",jdbc.query("SELECT event_type,created_at FROM booking_events WHERE tenant_id=? AND booking_id=? ORDER BY created_at,id",(r,n)->Map.of("type",r.getString(1),"at",r.getTimestamp(2).toInstant()),TenantContext.require(),id));
    return result;
   }finally{TenantContext.clear();}
@@ -92,12 +114,46 @@ public class BookingService {
  @Transactional public Map<String,Object> paymentForCustomer(String slug,String email,UUID id){
   try{bind(slug,email);expireCurrent();receipt(id,email);return payments.view(id);}finally{TenantContext.clear();}
  }
+ @Transactional public Map<String,Object> uploadEvidence(String slug,String email,UUID booking,byte[] bytes){
+  try{bind(slug,email);expireCurrent();var current=receipt(booking,email);UUID tenant=TenantContext.require();
+   String digest;try{digest=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
+   UUID intent=jdbc.queryForObject("SELECT id FROM payment_intents WHERE tenant_id=? AND booking_id=?",UUID.class,tenant,booking);
+   var existing=jdbc.query("SELECT id FROM payment_evidence WHERE tenant_id=? AND intent_id=? AND sha256=?",(r,n)->r.getObject(1,UUID.class),tenant,intent,digest);
+   if(!existing.isEmpty())return Map.of("id",existing.getFirst(),"status",current.get("status"),"expiresAt",current.get("expiresAt"));
+   if(!Set.of("AWAITING_PAYMENT","IN_REVIEW").contains(current.get("status")))throw conflict("O prazo desta reserva terminou. Não é possível enviar comprovante.");
+   if(jdbc.queryForObject("SELECT count(*) FROM payment_evidence WHERE tenant_id=? AND intent_id=?",Long.class,tenant,intent)>=5)throw conflict("Limite de cinco comprovantes por reserva atingido.");
+   var valid=EvidenceValidator.validate(bytes);UUID id=UUID.randomUUID();String key=tenant+"/"+booking+"/"+id;
+   org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){
+    public void afterCompletion(int status){if(status==STATUS_ROLLED_BACK)try{evidenceStorage.remove(key);}catch(RuntimeException ex){org.slf4j.LoggerFactory.getLogger(BookingService.class).warn("evidence_orphan_cleanup_required object_id={}",id);}}
+   });
+   evidenceStorage.put(key,valid.bytes(),valid.mediaType());
+   // Storage can take time: the acceptance deadline is checked again before committing.
+   if(!clock.instant().isBefore((Instant)current.get("expiresAt")))throw conflict("O prazo terminou durante o envio. A reserva não foi confirmada.");
+   jdbc.update("INSERT INTO payment_evidence(id,tenant_id,intent_id,object_key,sha256,media_type,size_bytes) VALUES (?,?,?,?,?,?,?)",id,tenant,intent,key,digest,valid.mediaType(),valid.bytes().length);
+   Instant deadline=(Instant)current.get("expiresAt");
+   if("AWAITING_PAYMENT".equals(current.get("status"))){
+    deadline=clock.instant().plusSeconds(86400).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    jdbc.update("UPDATE bookings SET status='IN_REVIEW',review_expires_at=? WHERE tenant_id=? AND id=?",Timestamp.from(deadline),tenant,booking);
+    jdbc.update("UPDATE payment_intents SET status='IN_REVIEW' WHERE tenant_id=? AND id=?",tenant,intent);
+    jdbc.update("UPDATE calendar_allocations SET expires_at=? WHERE tenant_id=? AND id=(SELECT allocation_id FROM bookings WHERE tenant_id=? AND id=?)",Timestamp.from(deadline),tenant,tenant,booking);
+    jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'IN_REVIEW')",UUID.randomUUID(),tenant,booking);
+   }
+   return Map.of("id",id,"status","IN_REVIEW","expiresAt",deadline);
+  }finally{TenantContext.clear();}
+ }
+ public record EvidenceFile(byte[] bytes,String mediaType){}
+ @Transactional public EvidenceFile downloadEvidence(String slug,String email,UUID booking,UUID evidence){
+  try{bind(slug,email);receipt(booking,email);
+   var rows=jdbc.query("SELECT e.object_key,e.media_type FROM payment_evidence e JOIN payment_intents p ON p.tenant_id=e.tenant_id AND p.id=e.intent_id WHERE e.tenant_id=? AND p.booking_id=? AND e.id=?",(r,n)->new String[]{r.getString(1),r.getString(2)},TenantContext.require(),booking,evidence);
+   if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Comprovante não encontrado.");return new EvidenceFile(evidenceStorage.get(rows.getFirst()[0]),rows.getFirst()[1]);
+  }finally{TenantContext.clear();}
+ }
  private Map<String,Object> receipt(UUID id,String email){
   var rows=jdbc.query("""
-   SELECT b.id,b.status,b.starts_at,b.ends_at,b.expires_at,b.timezone,b.price_cents,b.deposit_cents,b.service_snapshot->>'name'
+   SELECT b.id,b.status,b.starts_at,b.ends_at,coalesce(b.review_expires_at,b.expires_at),b.timezone,b.price_cents,b.deposit_cents,b.service_snapshot->>'name'
    FROM bookings b JOIN customers c ON c.tenant_id=b.tenant_id AND c.id=b.customer_id
-   WHERE b.tenant_id=? AND b.id=? AND c.email=?
-   """,(r,n)->{Map<String,Object> result=new LinkedHashMap<>();result.put("id",r.getObject(1,UUID.class));result.put("status",r.getString(2));result.put("start",r.getTimestamp(3).toInstant());result.put("end",r.getTimestamp(4).toInstant());result.put("expiresAt",r.getTimestamp(5).toInstant());result.put("timezone",r.getString(6));result.put("priceCents",r.getLong(7));result.put("depositCents",r.getLong(8));result.put("serviceName",r.getString(9));result.put("paymentAvailable",false);return result;},TenantContext.require(),id,email);
+   WHERE b.tenant_id=? AND b.id=? AND (c.email=? OR EXISTS(SELECT 1 FROM booking_access_codes a WHERE a.tenant_id=b.tenant_id AND a.booking_id=b.id AND 'code:'||a.code_hash=?))
+   """,(r,n)->{Map<String,Object> result=new LinkedHashMap<>();result.put("id",r.getObject(1,UUID.class));result.put("status",r.getString(2));result.put("start",r.getTimestamp(3).toInstant());result.put("end",r.getTimestamp(4).toInstant());result.put("expiresAt",r.getTimestamp(5).toInstant());result.put("timezone",r.getString(6));result.put("priceCents",r.getLong(7));result.put("depositCents",r.getLong(8));result.put("serviceName",r.getString(9));result.put("paymentAvailable",Set.of("AWAITING_PAYMENT","IN_REVIEW").contains(r.getString(2)));return result;},TenantContext.require(),id,email,email);
   if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Solicitação não encontrada.");return rows.getFirst();
  }
  // Caller holds the tenant lock. Expiration preserves all snapshots, events and idempotency receipts.
@@ -105,8 +161,8 @@ public class BookingService {
   expireCurrent(Integer.MAX_VALUE);
  }
  public int expireCurrent(int limit){
-  var tenant=TenantContext.require();var now=Timestamp.from(clock.instant());var expired=jdbc.query("UPDATE bookings SET status='EXPIRED' WHERE tenant_id=? AND id IN (SELECT id FROM bookings WHERE tenant_id=? AND status='AWAITING_PAYMENT' AND expires_at<=? ORDER BY expires_at,id LIMIT ?) RETURNING id,allocation_id",(r,n)->new UUID[]{r.getObject(1,UUID.class),r.getObject(2,UUID.class)},tenant,tenant,now,limit);
-  for(var row:expired){jdbc.update("UPDATE payment_intents SET status='EXPIRED' WHERE tenant_id=? AND booking_id=? AND status='AWAITING_PAYMENT'",tenant,row[0]);jdbc.update("UPDATE calendar_allocations SET active=false,released_at=coalesce(released_at,?) WHERE tenant_id=? AND id=?",now,tenant,row[1]);jdbc.update("UPDATE booking_usage SET state='RELEASED' WHERE tenant_id=? AND booking_id=? AND state='HELD'",tenant,row[0]);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'EXPIRED')",UUID.randomUUID(),tenant,row[0]);}
+  var tenant=TenantContext.require();var now=Timestamp.from(clock.instant());var expired=jdbc.query("UPDATE bookings SET status='EXPIRED' WHERE tenant_id=? AND id IN (SELECT id FROM bookings WHERE tenant_id=? AND status IN ('AWAITING_PAYMENT','IN_REVIEW') AND coalesce(review_expires_at,expires_at)<=? ORDER BY coalesce(review_expires_at,expires_at),id LIMIT ?) RETURNING id,allocation_id",(r,n)->new UUID[]{r.getObject(1,UUID.class),r.getObject(2,UUID.class)},tenant,tenant,now,limit);
+  for(var row:expired){jdbc.update("UPDATE payment_intents SET status='EXPIRED' WHERE tenant_id=? AND booking_id=? AND status IN ('AWAITING_PAYMENT','IN_REVIEW')",tenant,row[0]);jdbc.update("UPDATE calendar_allocations SET active=false,released_at=coalesce(released_at,?) WHERE tenant_id=? AND id=?",now,tenant,row[1]);jdbc.update("UPDATE booking_usage SET state='RELEASED' WHERE tenant_id=? AND booking_id=? AND state='HELD'",tenant,row[0]);jdbc.update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'EXPIRED')",UUID.randomUUID(),tenant,row[0]);}
   return expired.size();
  }
  @Transactional public void expireTenant(UUID tenant){TenantContext.set(tenant);try{tenants.applyCurrentTenant();jdbc.queryForObject("SELECT id FROM tenants WHERE id=? FOR UPDATE",UUID.class,tenant);expireCurrent();}finally{TenantContext.clear();}}

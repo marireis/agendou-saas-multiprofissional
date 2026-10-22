@@ -1,0 +1,17 @@
+# ADR-0021 — Conferência manual e pendências financeiras
+
+Data: 01/10/2026. Status: aceita. MVP-064/065/066.
+
+A aba Conferência pertence ao painel do profissional. A API deriva tenant da membership ADMIN; consulta e download exigem essa identidade, RLS e vínculo do comprovante à reserva. Mutações exigem CSRF, assinatura operacional e lock do tenant, compartilhado com reserva e expiração. Todas as respostas são no-store; arquivos continuam attachments privados.
+
+Recebimentos registram centavos positivos, conta recebedora, referência bancária, instante recebido, operador e correlation ID. O operador declara que conferiu o crédito fora do sistema. Referência é normalizada por trim/uppercase e única por tenant; mesmo conteúdo, inclusive data, repete o resultado sem novo lançamento; diferenças retornam 409. FKs compostas vinculam operador ao tenant. Histórico financeiro é append-only para runtime. Não há integração bancária, transferência automática nem edição de lançamentos.
+
+Confirmação exige reserva AWAITING_PAYMENT/IN_REVIEW dentro do prazo, alocação HOLD ativa e líquido recebido entre entrada mínima e total. A mesma transação registra recebimento/evento, muda reserva/intenção para CONFIRMED, alocação para BOOKING sem expiração e quota para COMMITTED. Falha desfaz tudo. Alocação confirmada continua protegida pela exclusão de intervalos, inclusive após o prazo original. Alteração do expediente/fuso é bloqueada enquanto houver ocupações futuras. Comprovante não é obrigatório para registrar um crédito que o operador verificou no banco; nunca é suficiente para confirmar sozinho.
+
+MVP-066 representa pendência financeira como projeção separada do estado da agenda: UNPAID, INSUFFICIENT, EXCESS, LATE, REFUNDED, DEPOSIT_PAID ou PAID. Isto detalha o diagrama conceitual PendenciaFinanceira sem substituir CONFIRMED/EXPIRED e sem perder a situação real do horário. Entrada parcial não renova prazo. Excedente anterior à confirmação impede confirmar até regularização; prazo continua correndo. Valor registrado após expiração fica LATE, ainda que a data bancária seja anterior; nunca reabre a reserva. Recebimentos posteriores de uma reserva já confirmada atualizam saldo/pendência sem liberar horário.
+
+Devolução manual registra transação de origem, centavos, referência única por tenant, motivo, data, operador e correlation ID. Data deve ficar entre recebimento e agora. Repetição idêntica é idempotente; soma das devoluções nunca supera o crédito original, inclusive sob concorrência. Se a devolução regulariza um excedente dentro do prazo, a reserva pode ser confirmada na mesma transação. Reserva expirada permanece expirada. Nenhum endpoint executa PIX.
+
+Limite desta etapa: devolver abaixo da entrada mínima de uma reserva confirmada é recusado. Esse caso deve acompanhar cancelamento/política e será implementado em MVP-067, para não manter um atendimento confirmado sem a entrada exigida. Também não há edição/estorno de lançamento incorreto nem email novo de confirmação nesta entrega; o cliente consulta estado e valores na área privada.
+
+V018 adiciona CONFIRMED/BOOKING, conta/correlation ID e FK de operador nos recebimentos. V019 habilita INSERT de devoluções e auditoria equivalente. Portal e calendário distinguem confirmação de expiração. PIX deixa o modo prévia para reservas pendentes; dados são ocultados após confirmação ou expiração. Identificação por email verificado permanece; migração para nome/sobrenome/telefone foi adiada pela responsável.

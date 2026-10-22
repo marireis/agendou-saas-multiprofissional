@@ -1,17 +1,532 @@
 openapi: 3.1.0
 info:
   title: Agendou API
-  version: 0.18.0
+  version: 0.28.0
   description: Identidade, assinatura e perfil. Todas as mutacoes exigem X-CSRF-TOKEN obtido em /auth/csrf, inclusive login e cadastro.
 servers:
   - url: http://localhost:8080/api/v1
 security:
   - session: []
 paths:
+  /admin/bookings/{id}/access-code:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Consultar possibilidade de reemissão e histórico
+      description: ADMIN do tenant da sessão; no-store. Nunca retorna código/hash. Reservas legadas por email retornam available=false. Consulta permitida após bloqueio da assinatura.
+      responses:
+        '200':
+          description: Metadados e até dez reemissões mais recentes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: {type: boolean}
+                  version: {type: integer, minimum: 0}
+                  originalName: {type: string, description: Nome original normalizado para acesso.}
+                  originalPhone: {type: string}
+                  history:
+                    type: array
+                    maxItems: 10
+                    items:
+                      type: object
+                      required: [version, reason, at]
+                      properties:
+                        version: {type: integer}
+                        reason: {type: string}
+                        at: {type: string, format: date-time}
+        '401': {description: Sessão ausente.}
+        '403': {description: ADMIN ausente.}
+        '404': {description: Reserva não encontrada no tenant.}
+    post:
+      summary: Invalidar código anterior e emitir outro após verificação profissional
+      description: ADMIN, assinatura operacional e CSRF. Versão esperada e intervalo mínimo de 60 segundos. Rotação/auditoria atômicas. Código entregue uma única vez nesta resposta no-store. Sessões/recibos com hash anterior deixam de autorizar consultas. Nenhum envio externo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, reason, identityVerified]
+              properties:
+                expectedVersion: {type: integer, minimum: 0}
+                reason: {type: string, minLength: 5, maxLength: 500}
+                identityVerified: {type: boolean, const: true}
+      responses:
+        '200':
+          description: Novo código privado; entregar somente ao cliente verificado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessCode, version]
+                properties:
+                  accessCode: {type: string, minLength: 43, maxLength: 43}
+                  version: {type: integer, minimum: 1}
+        '401': {description: Sessão ausente.}
+        '403': {description: ADMIN, assinatura operacional ou CSRF ausentes.}
+        '404': {description: Reserva com código não encontrada no tenant.}
+        '409': {description: Versão desatualizada ou intervalo mínimo ainda não cumprido.}
+        '422': {description: Dados inválidos, motivo insuficiente ou confirmação ausente.}
+  /admin/finance:
+    get:
+      summary: Financeiro do profissional
+      description: ADMIN do tenant da sessão; no-store; disponível com assinatura bloqueada. Datas inclusivas no fuso atual do perfil, até 366 dias. Movimentações pela data do lançamento; pendências pelo horário atual do atendimento, usando todo o histórico financeiro. Totais independem da página. Consulta consistente em REPEATABLE READ. Não registra nem transfere dinheiro.
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+        - {name: view, in: query, schema: {type: string, enum: [MOVEMENTS, BALANCES], default: MOVEMENTS}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+      responses:
+        '200':
+          description: Resumo completo do período e até 50 itens da visão escolhida.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, timezone, view, summary, items, hasMore]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  timezone: {type: string}
+                  view: {type: string, enum: [MOVEMENTS, BALANCES]}
+                  hasMore: {type: boolean}
+                  summary:
+                    type: object
+                    required: [receivedCents, refundedCents, netCents, depositDueCents, totalDueCents, refundDueCents, reviewCents]
+                    properties:
+                      receivedCents: {type: integer, format: int64, minimum: 0}
+                      refundedCents: {type: integer, format: int64, minimum: 0}
+                      netCents: {type: integer, format: int64, description: Recebido menos devolvido no período; pode ser negativo.}
+                      depositDueCents: {type: integer, format: int64, minimum: 0, description: Parte do totalDueCents.}
+                      totalDueCents: {type: integer, format: int64, minimum: 0, description: Restante previsto dos atendimentos selecionados.}
+                      refundDueCents: {type: integer, format: int64, minimum: 0}
+                      reviewCents: {type: integer, format: int64, minimum: 0, description: Crédito em expiradas ou excedentes para avaliação.}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [bookingId, customerName, serviceName, at]
+                      properties:
+                        id: {type: string, format: uuid, description: Somente movimentações.}
+                        bookingId: {type: string, format: uuid}
+                        customerName: {type: string}
+                        serviceName: {type: string}
+                        at: {type: string, format: date-time}
+                        kind: {type: string, enum: [RECEIPT, REFUND]}
+                        amountCents: {type: integer, format: int64, minimum: 0}
+                        status: {type: string, description: Estado efetivo da reserva, na visão BALANCES.}
+                        netCents: {type: integer, format: int64}
+                        depositDueCents: {type: integer, format: int64, minimum: 0}
+                        totalDueCents: {type: integer, format: int64, minimum: 0}
+                        refundDueCents: {type: integer, format: int64, minimum: 0}
+                        reviewCents: {type: integer, format: int64, minimum: 0}
+        '400': {description: Datas, período, visão ou paginação inválidos.}
+        '401': {description: Sessão ausente.}
+        '403': {description: Membership ADMIN ausente.}
+  /admin/notifications:
+    get:
+      summary: Consultar avisos internos do administrador
+      description: ADMIN do tenant da sessão. Inclui histórico e permite consulta com assinatura bloqueada. Sem dados de contato, códigos ou PIX. Resposta no-store.
+      parameters:
+        - {name: unreadOnly, in: query, schema: {type: boolean, default: false}}
+        - {name: before, in: query, description: ID do último evento da página anterior; validado no tenant., schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Até 50 eventos ordenados por data/id decrescentes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unreadCount, nextCursor]
+                properties:
+                  unreadCount: {type: integer, minimum: 0}
+                  nextCursor: {type: string, description: Vazio quando não há outra página.}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [id, bookingId, type, at, serviceName, start, timezone, read]
+                      properties:
+                        id: {type: string, format: uuid}
+                        bookingId: {type: string, format: uuid}
+                        type: {type: string, enum: [REQUESTED, IN_REVIEW, CONFIRMED, RESCHEDULED, EXPIRED, CANCELED, COMPLETED, NO_SHOW, PAYMENT_RECORDED, REFUND_RECORDED]}
+                        at: {type: string, format: date-time}
+                        serviceName: {type: string}
+                        start: {type: string, format: date-time, description: Horário atual da reserva.}
+                        timezone: {type: string}
+                        read: {type: boolean}
+        '401': {description: Sessão ausente.}
+        '403': {description: Membership ADMIN ausente.}
+        '404': {description: Cursor não encontrado no tenant.}
+  /admin/notifications/{id}/read:
+    post:
+      summary: Marcar aviso como lido pelo administrador atual
+      description: ADMIN e CSRF obrigatórios. Idempotente; não altera a leitura de outros administradores nem o atendimento. Resposta no-store.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Leitura registrada ou já existente.}
+        '401': {description: Sessão ausente.}
+        '403': {description: Membership ADMIN ou CSRF inválido.}
+        '404': {description: Aviso não encontrado no tenant.}
+  /public/{slug}/phone/review:
+    parameters:
+      - {name: slug, in: path, required: true, schema: {type: string}}
+    post:
+      security: []
+      summary: Revisar reserva pública sem login ou email
+      description: CSRF obrigatório. Nome, sobrenome e telefone com DDD; valida publicação, assinatura e configuração PIX. Sessão de revisão válida por 15 minutos. Não ocupa horário.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/PhoneContact'}
+                - type: object
+                  required: [serviceId, start]
+                  properties:
+                    serviceId: {type: string, format: uuid}
+                    start: {type: string, format: date-time}
+      responses:
+        '200': {description: Nome e telefone normalizados, serviço, início/fim, fuso, valores, política, quote e slotAvailable; no-store}
+        '404': {description: Página ou serviço indisponível}
+        '422': {description: Contato inválido}
+        '429': {description: Limite por telefone ou conexão}
+    get:
+      security: []
+      summary: Recuperar revisão da sessão pública
+      responses:
+        '200': {description: Revisão atualizada; no-store}
+        '401': {description: Revisão ausente ou vencida}
+  /public/{slug}/phone/bookings:
+    post:
+      security: []
+      summary: Criar reserva e entregar código privado
+      description: CSRF e sessão de revisão obrigatórios; sem autenticação de conta. Compartilha quota, alocação e intenção PIX com o fluxo legado. Código de 43 caracteres autoriza apenas esta reserva; guardar antes de sair. Não envia email.
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quote, accepted]
+              properties:
+                quote: {type: string, pattern: '^[a-f0-9]{64}$'}
+                accepted: {type: boolean, const: true}
+      responses:
+        '201': {description: Recibo de reserva temporária e accessCode; no-store. Repetição idêntica devolve a mesma reserva}
+        '401': {description: Revisão vencida}
+        '409': {description: Horário, quota, condições ou chave conflitantes}
+  /public/{slug}/phone/current:
+    get:
+      security: []
+      summary: Recuperar recibo e código na sessão por uma hora
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Detalhe atualizado e accessCode; no-store}
+        '404': {description: Sem recibo vigente na sessão}
+  /public/{slug}/client/code:
+    post:
+      security: []
+      summary: Consultar reserva com contato e código privado
+      description: CSRF obrigatório. Erro genérico; limites por telefone/conexão. Sessão de uma hora, restrita à reserva do código em todos os endpoints de detalhe, pagamento e comprovantes. Não concede acesso a outras reservas do mesmo telefone. Disponível após retirada da página ou bloqueio da assinatura.
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/PhoneContact'}
+                - type: object
+                  required: [code]
+                  properties:
+                    code: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '200': {description: Acesso autorizado; no-store}
+        '400': {description: Dados ou código inválidos}
+        '429': {description: Limite de tentativas}
+  /admin/customers:
+    get:
+      summary: Buscar clientes do tenant
+      parameters:
+        - {name: search, in: query, schema: {type: string, maxLength: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000}}
+      responses:
+        '200': {description: items (até 50) e hasMore; id/name/email/phone/version/emailLocked; no-store}
+    post:
+      summary: Cadastrar cliente sem sobrescrever contato existente
+      description: ADMIN, CSRF e assinatura operacional. Deduplicação por email ou por telefone/nome normalizados sem email. Telefone obrigatório sem email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerEdit'}
+      responses:
+        '200': {description: Cliente criado ou já existente; no-store}
+  /admin/customers/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Cadastro e histórico de atendimentos
+      parameters:
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000}}
+      responses:
+        '200': {description: customer, bookings (até 20) e hasMore; no-store}
+        '404': {description: Cliente não encontrado neste tenant}
+    put:
+      summary: Editar cadastro com versão e auditoria
+      description: Email não pode mudar após reserva. Contato de acesso por código preserva os dados informados na reserva. ADMIN, CSRF e assinatura operacional.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerEdit'}
+      responses:
+        '200': {description: Cliente atualizado; no-store}
+        '409': {description: Versão, identidade ou duplicidade conflitante}
+  /admin/customers/{id}/booking-quote:
+    get:
+      summary: Consultar valores e política para reserva assistida
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: serviceId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: quote, priceCents, depositCents, timezone e cancellationPolicy; no-store}
+  /admin/customers/{id}/bookings:
+    post:
+      summary: Criar reserva assistida para cliente
+      description: ADMIN, CSRF, assinatura operacional, disponibilidade e quota. Publicação não obrigatória. Sem confirmação ou mensagem automática. Cadastro sem email recebe accessCode para repassar ao cliente; repetição na mesma sessão recupera o código.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceId, start, requestKey, quote, confirmed]
+              properties:
+                serviceId: {type: string, format: uuid}
+                start: {type: string, format: date-time}
+                requestKey: {type: string, format: uuid}
+                quote: {type: string, maxLength: 100}
+                confirmed: {type: boolean, const: true}
+      responses:
+        '200': {description: Recibo idempotente da reserva; accessCode quando aplicável; no-store}
+        '409': {description: Horário, quota, valores ou chave conflitantes}
+  /admin/bookings/{id}/outcome:
+    post:
+      summary: Concluir atendimento ou registrar falta
+      description: ADMIN, CSRF e assinatura operacional. Somente CONFIRMED após ends_at; versão do horário deve coincidir. Lock serializa com reagendamento/cancelamento. Repetição igual não duplica; decisão diferente conflita. Não altera saldo, intenção de pagamento, quota ou alocação histórica. No-store.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, expectedVersion, reason, confirmed]
+              properties:
+                status: {type: string, enum: [COMPLETED, NO_SHOW]}
+                expectedVersion: {type: integer, minimum: 0}
+                reason: {type: string, minLength: 5, maxLength: 1000, description: Observação visível ao cliente}
+                confirmed: {type: boolean, const: true}
+      responses:
+        '200': {description: id e status do atendimento encerrado}
+        '403': {description: CSRF/membership/assinatura inválidos}
+        '404': {description: Atendimento não encontrado no tenant}
+        '409': {description: Não confirmado, horário não terminou, versão mudou ou resultado já registrado com outros dados}
+        '422': {description: Observação inválida}
+  /admin/bookings/{id}/reschedule-options:
+    get:
+      summary: Consultar horários para reagendar o mesmo serviço
+      description: ADMIN e RLS. Usa duração/buffers originais, expediente atual, fuso da reserva, intervalo, antecedência de 24h e horizonte de 60 dias. Exclui somente a própria ocupação. No-store; consulta não reserva horário.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200': {description: version/currentStart/timezone/minDate/maxDate/slots; slots contém start/end UTC}
+        '401': {description: Sessão necessária}
+        '403': {description: Membership necessária}
+        '404': {description: Reserva não encontrada no tenant}
+        '409': {description: Reserva não pode ser reagendada}
+  /admin/bookings/{id}/reschedule:
+    post:
+      summary: Reagendar atendimento preservando serviço e pagamentos
+      description: ADMIN, CSRF e assinatura operacional. Recalcula disponibilidade sob lock. Troca atômica, sem renovação de prazo. Mês de destino respeita quota. Chave idempotente com conteúdo igual retorna estado atual sem repetir alteração; conteúdo diferente conflita.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestKey, expectedVersion, start, reason]
+              properties:
+                requestKey: {type: string, format: uuid}
+                expectedVersion: {type: integer, minimum: 0}
+                start: {type: string, format: date-time}
+                reason: {type: string, minLength: 5, maxLength: 1000, description: Motivo visível ao cliente}
+      responses:
+        '200': {description: id/start/end/version/status da reserva atualizada}
+        '403': {description: CSRF/membership/assinatura inválidos}
+        '404': {description: Reserva não encontrada no tenant}
+        '409': {description: Horário indisponível, reserva inválida, versão/chave em conflito ou quota de destino atingida}
+        '422': {description: Motivo inválido}
+  /admin/payment-reviews/{id}/cancel:
+    post:
+      summary: Cancelar atendimento antes do início e registrar decisão financeira
+      description: ADMIN, CSRF, assinatura operacional e lock do tenant. Política textual do snapshot revisada pelo operador. Reenvio idêntico não duplica; valores desatualizados retornam conflito. Libera horário e quota provisória; quota confirmada permanece consumida. Não transfere dinheiro. Devolução é registrada separadamente no banco e na API.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, expectedNetCents, refundCents, policyReviewed]
+              properties:
+                reason: {type: string, minLength: 5, maxLength: 1000, description: Motivo visível ao cliente}
+                expectedNetCents: {type: integer, minimum: 0, description: Líquido exibido ao revisar a decisão}
+                refundCents: {type: integer, minimum: 0, description: Valor ainda a devolver; não superior ao líquido atual}
+                policyReviewed: {type: boolean, const: true}
+      responses:
+        '200': {description: Detalhe atualizado com CANCELED, cancellation e refundDueCents}
+        '403': {description: CSRF/membership/assinatura inválidos}
+        '404': {description: Reserva ausente ou de outro tenant}
+        '409': {description: Valores mudaram, decisão diferente já registrada, reserva expirada ou atendimento iniciado}
+        '422': {description: Motivo ou decisão financeira inválidos}
+  /admin/payment-reviews:
+    get:
+      summary: Listar reservas para conferência do profissional
+      description: Membership ADMIN, tenant derivado da sessão, no-store. Em conferência primeiro. Até 50 itens e hasMore; assinatura bloqueada mantém leitura.
+      parameters:
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+      responses:
+        '200': {description: items e hasMore; itens com id/status/customerName/serviceName/start/timezone/depositCents/deadline}
+        '401': {description: Sessão necessária}
+        '403': {description: Membership ausente}
+  /admin/payment-reviews/{id}:
+    get:
+      summary: Detalhe financeiro privado da reserva
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Dados da lista mais totalCents/receivedCents/grossReceivedCents/refundedCents/financialStatus/evidence/transactions/refunds; no-store}
+        '404': {description: Reserva ausente ou de outro tenant}
+  /admin/payment-reviews/{id}/evidence/{evidence}:
+    get:
+      summary: Baixar comprovante como administrador do tenant
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: evidence, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Attachment privado PNG/PDF; no-store, nosniff e CSP sandbox}
+        '404': {description: Reserva ou comprovante fora do tenant/vínculo}
+        '503': {description: Storage indisponível}
+  /admin/payment-reviews/{id}/receipts:
+    post:
+      summary: Registrar crédito conferido no banco
+      description: Exige ADMIN, CSRF e assinatura operacional. Referência normalizada trim/uppercase única por tenant; repetição idêntica não duplica. Recebimento tardio é registrado sem reabrir reserva. Confirmação exige líquido entre entrada e total, prazo e alocação válidos. Valores em centavos, sem transferência automática.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountCents, bankReference, receivingAccount, receivedAt, verified]
+              properties:
+                amountCents: {type: integer, minimum: 1, maximum: 1000000000}
+                bankReference: {type: string, minLength: 1, maxLength: 200}
+                receivingAccount: {type: string, minLength: 2, maxLength: 120}
+                receivedAt: {type: string, format: date-time, description: Entre criação da reserva e agora}
+                verified: {type: boolean, const: true}
+      responses:
+        '200': {description: Detalhe atualizado; confirmação e lançamento atômicos}
+        '403': {description: CSRF/membership/assinatura inválidos}
+        '404': {description: Reserva ausente ou de outro tenant}
+        '409': {description: Referência com dados conflitantes ou alocação indisponível}
+        '422': {description: Dados ou data inválidos}
+  /admin/payment-reviews/{id}/refunds:
+    post:
+      summary: Registrar devolução já realizada no banco
+      description: Exige ADMIN, CSRF e assinatura operacional. Idempotência pela referência normalizada e dados iguais. Limite cumulativo por recebimento sob lock. Não executa transferência nem reabre reserva expirada. Reduzir entrada de confirmada exige cancelamento prévio. Cancelada limita devolução à decisão registrada.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionId, amountCents, bankReference, reason, refundedAt, verified]
+              properties:
+                transactionId: {type: string, format: uuid}
+                amountCents: {type: integer, minimum: 1, maximum: 1000000000}
+                bankReference: {type: string, minLength: 1, maxLength: 200}
+                reason: {type: string, minLength: 5, maxLength: 1000}
+                refundedAt: {type: string, format: date-time, description: Entre recebimento original e agora}
+                verified: {type: boolean, const: true}
+      responses:
+        '200': {description: Detalhe atualizado; histórico preservado}
+        '403': {description: CSRF/membership/assinatura inválidos}
+        '404': {description: Reserva ou recebimento fora do tenant/vínculo}
+        '409': {description: Referência conflitante, limite excedido ou entrada confirmada comprometida}
+        '422': {description: Dados ou data inválidos}
+  /public/{slug}/client/bookings/{id}/evidence:
+    post:
+      summary: Enviar comprovante privado sem confirmar pagamento
+      description: Sessão de cliente, propriedade e CSRF obrigatórios. JPEG/PNG/PDF validados por conteúdo, até 5 MB. Primeiro envio no prazo muda para IN_REVIEW por 24h; reenvio não renova prazo. Mesmo conteúdo devolve mesmo ID. Até cinco arquivos por reserva.
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '201': {description: id, status e expiresAt; upload não confirma pagamento}
+        '401': {description: Acesso de cliente ausente ou expirado}
+        '403': {description: CSRF inválido}
+        '404': {description: Reserva não encontrada ou de outro cliente}
+        '409': {description: Prazo encerrado ou limite de arquivos atingido}
+        '413': {description: Arquivo maior que 5 MB}
+        '422': {description: Conteúdo inválido, ativo, protegido ou além dos limites de páginas/pixels}
+        '503': {description: Armazenamento indisponível, sem mudança de estado}
+  /public/{slug}/client/bookings/{id}/evidence/{evidence}:
+    get:
+      summary: Download autorizado do comprovante
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: evidence, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Attachment PNG/PDF, no-store, nosniff, CSP sandbox. Nunca retorna URL ou chave S3.}
+        '401': {description: Sessão necessária}
+        '404': {description: Reserva/comprovante não encontrado ou de outro cliente}
+        '503': {description: Armazenamento indisponível}
   /public/{slug}/client/bookings/{id}/payment:
     get:
       summary: Prévia privada do PIX preservado na reserva
-      description: Exige sessão de cliente verificado e propriedade da reserva. Não confirma recebimento nem permite transferência automática. paymentAvailable=false até integrar comprovantes/conferência. Sem cache. Consulta preservada após retirada da página ou bloqueio da assinatura.
+      description: Exige sessão de cliente verificado e propriedade da reserva. Não confirma recebimento nem permite transferência automática. paymentAvailable=true somente para reservas pendentes; confirmação, cancelamento e expiração ocultam dados PIX. Sem cache. Consulta preservada após retirada da página ou bloqueio da assinatura.
       parameters:
         - {name: slug, in: path, required: true, schema: {type: string}}
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -26,17 +541,30 @@ paths:
                 properties:
                   id: {type: string, format: uuid}
                   provider: {type: string, const: MANUAL_PIX}
-                  status: {type: string, enum: [AWAITING_PAYMENT, EXPIRED]}
+                  status: {type: string, enum: [AWAITING_PAYMENT, IN_REVIEW, CONFIRMED, EXPIRED, CANCELED, COMPLETED, NO_SHOW]}
+                  cancellation: {type: object, description: Presente após cancelamento; reason, retainedCents e at}
+                  refundDueCents: {type: integer, minimum: 0, description: Devolução ainda pendente após cancelamento}
+                  receivedCents: {type: integer, description: Recebimentos menos devoluções registrados manualmente}
+                  refundedCents: {type: integer}
+                  financialStatus: {type: string, enum: [UNPAID, INSUFFICIENT, EXCESS, LATE, REFUNDED, DEPOSIT_PAID, PAID, REFUND_DUE, CANCELED_SETTLED]}
                   totalCents: {type: integer}
                   depositCents: {type: integer}
                   remainingAfterDepositCents: {type: integer, description: Saldo projetado depois de pagar a entrada; não representa recebimento confirmado}
                   deadline: {type: string, format: date-time}
                   timezone: {type: string}
-                  paymentAvailable: {type: boolean, const: false}
+                  paymentAvailable: {type: boolean}
                   keyType: {type: string}
                   pixKey: {type: string}
                   recipientName: {type: string}
                   instructions: {type: string}
+                  evidence:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        mediaType: {type: string}
+                        createdAt: {type: string, format: date-time}
         '401': {description: Sessão de cliente ausente ou expirada}
         '404': {description: Reserva/intenção inexistente ou de outro cliente}
   /public/{slug}/client/access-links:
@@ -123,7 +651,7 @@ paths:
               properties:
                 quote: {type: string, pattern: '^[a-f0-9]{64}$', description: Hash retornado pela revisão aceita pelo cliente}
       responses:
-        '201': {description: Recibo da criação com id/status/start/end/expiresAt/timezone/serviceName/priceCents/depositCents/paymentAvailable=false; mesma chave/corpo repete recibo original sem novo efeito. no-store}
+        '201': {description: Recibo da criação com id/status/start/end/expiresAt/timezone/serviceName/priceCents/depositCents/paymentAvailable; mesma chave/corpo repete recibo original sem novo efeito. no-store}
         '400': {description: Cabeçalho ou corpo malformado}
         '401': {description: Sessão de revisão ausente, expirada ou de outro slug}
         '403': {description: CSRF inválido ou assinatura bloqueada para nova reserva}
@@ -257,9 +785,10 @@ paths:
                       type: object
                       properties:
                         id: {type: string, format: uuid}
-                        kind: {type: string, enum: [BLOCK, HOLD]}
+                        kind: {type: string, enum: [BLOCK, HOLD, BOOKING]}
                         bookingId: {type: [string, 'null'], format: uuid, description: Reserva temporária vinculada à alocação}
                         serviceName: {type: [string, 'null'], description: Nome preservado no snapshot da reserva}
+                        bookingStatus: {type: [string, 'null'], description: Estado da reserva, incluindo IN_REVIEW para conferência pendente}
                         start: {type: string, format: date-time}
                         end: {type: string, format: date-time}
                         protectedStart: {type: string, format: date-time}
@@ -966,6 +1495,21 @@ components:
             properties:
               token: {type: string, maxLength: 128}
   schemas:
+    PhoneContact:
+      type: object
+      required: [firstName, lastName, phone]
+      properties:
+        firstName: {type: string, minLength: 2, maxLength: 50}
+        lastName: {type: string, minLength: 2, maxLength: 49}
+        phone: {type: string, maxLength: 25, description: Telefone brasileiro com DDD; normalizado para 10 ou 11 dígitos}
+    CustomerEdit:
+      type: object
+      required: [name, email, phone, version]
+      properties:
+        name: {type: string, minLength: 2, maxLength: 100}
+        email: {type: string, maxLength: 254, description: Email legado opcional; enviar string vazia para cadastro sem email}
+        phone: {type: string, maxLength: 25}
+        version: {type: integer, minimum: 0}
     SlotCandidate:
       type: object
       required: [start, end]

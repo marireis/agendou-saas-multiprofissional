@@ -153,4 +153,25 @@ As próximas migrations devem continuar a numeração existente, sem reutilizar 
 
 - V015: booking_expiration_jobs por tenant, com token/validade de lease, próxima tentativa e contador de falhas. RLS sem acesso direto do runtime; funções mínimas de claim/validação/finalização e trigger para novos tenants. Retorna somente coordenadas de trabalho. ADR-0018.
 
-- V016: payment_intents (um por tenant/reserva, entrada/prazo imutáveis, AWAITING_PAYMENT/EXPIRED), payment_transactions (referência bancária única por tenant), payment_evidence (objeto privado/hash/tipo/tamanho) e payment_refunds (registro auditável de devolução). FORCE RLS e FKs compostas. Runtime escreve apenas intenção/estado; operações das demais tabelas pendentes de MVP-062+. Backfill de reservas anteriores sem renovar prazo. ADR-0019.
+- V016: payment_intents (um por tenant/reserva, entrada/prazo imutáveis, AWAITING_PAYMENT/EXPIRED), payment_transactions (referência bancária única por tenant), payment_evidence (objeto privado/hash/tipo/tamanho) e payment_refunds (registro auditável de devolução). FORCE RLS e FKs compostas. Backfill de reservas anteriores sem renovar prazo. ADR-0019.
+- V017: bookings/payment_intents aceitam IN_REVIEW, bookings.review_expires_at preserva o prazo inicial e determina vencimento da análise. Unicidade de payment_evidence por tenant/intent/hash, INSERT restrito ao runtime sob RLS. Alocação acompanha prazo de análise, quota permanece HELD. Claim do worker considera os dois estados e prazo efetivo. Recebimentos/devoluções continuam pendentes. ADR-0020.
+
+- V018: CONFIRMED em bookings/payment_intents; BOOKING sem expiração em calendar_allocations. payment_transactions recebe receiving_account/correlation_id, FK de operador à membership e INSERT runtime sob RLS. Confirmação compromete quota e preserva ocupação.
+- V019: payment_refunds recebe correlation_id, FK composta do operador e INSERT runtime sob RLS. Limite acumulado de devoluções imposto pelo serviço sob lock. Pendência financeira é projeção dos lançamentos separada do estado da agenda (ADR-0021); não existe transferência automática.
+
+- V020: CANCELED em bookings/payment_intents e booking_cancellations (PK tenant/reserva, membership do operador, motivo, líquido considerado, valor mantido, data/correlation ID). FORCE RLS e runtime SELECT/INSERT. Cancelamento libera alocação, quota HELD e gera evento atômico; COMMITTED preservada. REFUND_DUE/CANCELED_SETTLED são projeções financeiras, não estados de agenda. ADR-0022.
+
+- V021: bookings.schedule_version, UPDATE restrito dos horários/versão e mês de booking_usage; booking_reschedules com old/new start/end, request_key, expected_version, motivo, operador e correlation ID. RLS/FKs compostas e append-only. Reagendamento atômico move alocação/quota, preservando recebimentos e prazos. ADR-0023.
+
+- V022: COMPLETED/NO_SHOW em bookings; booking_outcomes com decisão única por tenant/reserva, versão de agenda, observação, operador e correlation ID. FORCE RLS/FKs compostas/runtime SELECT+INSERT. payment_intents permanece CONFIRMED, quota COMMITTED e alocação histórica preservadas. ADR-0024.
+
+- V023: telefone/version em customers; customer_changes e assisted_bookings com autoria, FKs compostas e FORCE RLS. Cadastro versionado, sem exclusão de histórico.
+- V024: customers.email aceita NULL; contact_name_key e índice único tenant/telefone/nome para registros sem email. booking_access_codes guarda hash SHA-256, reserva/tenant e dados de contato originais, com FORCE RLS e função mínima de resolução por slug/hash. Código em claro não é salvo na resposta idempotente; fica temporariamente na sessão para recuperação do recibo. Não mescla dados legados por email. ADR-0025.
+
+## V025 — Leitura de notificações
+
+`notification_reads(tenant_id,event_id,user_id,read_at)` tem chave composta por tenant/evento/usuário e FKs para evento e membership, FORCE RLS, SELECT/INSERT para runtime. Histórico vem de `booking_events`, com índice por tenant/data/id e sem fila duplicada. Leitura individual e idempotente; nenhum segredo ou contato é copiado.
+
+## V026 — Reemissão de código
+
+booking_access_codes recebe version/rotated_at e permissão de UPDATE somente para hash/versão/data. booking_code_reissues registra tenant/reserva/versão, operador, motivo, data e correlation ID, com FKs compostas, FORCE RLS e SELECT/INSERT. Não armazena segredos ou hashes na auditoria.

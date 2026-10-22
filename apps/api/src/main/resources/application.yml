@@ -33,6 +33,11 @@ server:
         secure: ${AGENDOU_SECURE_COOKIE:true}
         same-site: lax
 agendou:
+  storage:
+    endpoint: ${AGENDOU_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${AGENDOU_STORAGE_ACCESS_KEY:agendou}
+    secret-key: ${AGENDOU_STORAGE_SECRET_KEY:agendou-local}
+    bucket: ${AGENDOU_STORAGE_BUCKET:agendou-evidence-private}
   mfa-encryption-key: ${AGENDOU_MFA_ENCRYPTION_KEY:}
   public-url: ${AGENDOU_PUBLIC_URL:http://localhost:3000}
   mail-from: ${AGENDOU_MAIL_FROM:no-reply@agendou.local}

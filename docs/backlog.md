@@ -94,16 +94,16 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** completar reserva, pagamento, conferencia e atendimento.
 
-- [x] **MVP-060 (base):** PaymentIntent transacional, estruturas PaymentTransaction/PaymentEvidence/Refund e PaymentProvider manual. V016/ADR-0019; operações de recebimento/comprovante/devolução dependem de MVP-062+.
-- [x] **MVP-061 (interface):** prévia privada com total, entrada, saldo projetado, recebedor, chave PIX, copiar chave e prazo. Pagamento operacional permanece desabilitado até integração de comprovantes/conferência.
-- [ ] **MVP-062:** receber JPEG, PNG ou PDF ate 5 MB, validar conteudo e armazenar em area privada.
-- [ ] **MVP-063:** mover para `EmConferencia` apos comprovante no prazo, sem estender prazo por reenvio.
-- [ ] **MVP-064:** painel de conferencia com valor recebido, conta, referencia bancaria unica e data.
-- [ ] **MVP-065:** confirmar somente com entrada liquida suficiente e reserva valida, sob lock.
-- [ ] **MVP-066:** tratar pagamento insuficiente, duplicado, excedente, tardio e devolucao manual.
-- [ ] **MVP-067:** implementar cancelar, reagendar mesmo servico, concluir, marcar falta e reserva assistida.
-- [ ] **MVP-068:** enviar emails de solicitacao, confirmacao, alteracao, expiracao e cancelamento.
-- [ ] **MVP-069:** aba Financeiro do profissional com recebimentos, entradas/saldos pendentes, devolucoes e filtros por periodo, derivados dos pagamentos reais; independente da assinatura do SaaS.
+- [x] **MVP-060 (base):** PaymentIntent transacional, estruturas PaymentTransaction/PaymentEvidence/Refund e PaymentProvider manual. V016/ADR-0019; operações integradas em MVP-062 a 066.
+- [x] **MVP-061 (interface):** prévia privada com total, entrada, saldo projetado, recebedor, chave PIX, copiar chave e prazo. PIX e conferência integrados em MVP-062 a 066; não há execução automática de transferência.
+- [x] **MVP-062:** JPEG/PNG/PDF até 5 MB validados por conteúdo, armazenamento S3 privado e consulta pelo cliente proprietário. Até cinco arquivos; deduplicação por hash. V017/ADR-0020.
+- [x] **MVP-063:** `IN_REVIEW` após comprovante no prazo, com análise por 24h sem renovação por reenvio. Expiração libera horário/quota; upload não confirma pagamento.
+- [x] **MVP-064:** aba Conferência com consulta privada, valor recebido, conta, referência bancária única, data e operador. V018/ADR-0021.
+- [x] **MVP-065:** confirmação sob lock com entrada líquida suficiente, sem excedente, prazo/alocação válidos; BOOKING permanente e quota COMMITTED.
+- [x] **MVP-066:** pendências de insuficiência, duplicidade, excedente e pagamento tardio; devolução manual auditada/idempotente, limitada ao crédito original sob lock. V019. Devolução da entrada integrada ao cancelamento profissional de MVP-067.
+- [x] **MVP-067:** cancelamento profissional implementado com política original, decisão de devolução, liberação de horário e auditoria (V020/ADR-0022). Reagendamento do mesmo serviço implementado (V021/ADR-0023), com disponibilidade, versão, idempotência e quota mensal. Conclusão/falta implementadas (V022/ADR-0024), após término previsto. Reserva assistida com cadastro de clientes implementada (V023/V024, ADR-0025).
+- [ ] **MVP-068 (parcial):** central interna implementada em 13/10: eventos transacionais, leitura individual, não lidas, paginação e acesso à reserva; V025/ADR-0026. Portal atende clientes por código e legados. Envio externo de confirmação/alteração/expiração/cancelamento permanece pendente de canal, provedor e política de entrega; WhatsApp/SMS não configurados.
+- [x] **MVP-069:** Financeiro implementado em 13/10, com recebimentos/devoluções por data de lançamento e pendências por data de atendimento; totais completos, paginação, filtros/fuso e acesso à Conferência. ADR-0027; consulta segura independente da assinatura do SaaS. Homologação visual autenticada pendente.
 
 **Saida:** jornada ponta a ponta real com PIX manual e operacao diaria.
 
@@ -111,11 +111,11 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 
 **Objetivo:** garantir que o produto pode ser operado e recuperado.
 
-- [ ] **MVP-070:** aba Clientes com cadastro manual, edicao, busca, contato e historico por tenant; coordenar duplicidades com reservas. Antecipar junto da reserva assistida (MVP-067), antes da homologacao.
-- [ ] **MVP-071:** procedimentos de exportacao, correcao e exclusao verificadas.
-- [ ] **MVP-072:** revisar CSP, CSRF, uploads, rate limits, logs, arquivos privados e tokens.
-- [ ] **MVP-073:** testar restore de banco e arquivos, registrando RPO/RTO medidos.
-- [ ] **MVP-074:** executar E2E, carga, acessibilidade por teclado/leitor e revisao de mensagens.
+- [x] **MVP-070:** aba Clientes com cadastro manual, edição versionada, busca, contato e histórico por tenant; deduplicação por email legado ou nome/telefone sem email, sem transferir acesso ao histórico. V023/V024, ADR-0025.
+- [ ] **MVP-071 (parcial):** runbook técnico de atendimento verificado e correção em 22/10; exportação/exclusão operacional e política de retenção ainda pendentes.
+- [ ] **MVP-072 (parcial):** proteção HTTP, CSP parcial e revisão/testes API em 22/10; completar CSP de scripts/styles, ingress confiável, configuração e logs de produção.
+- [ ] **MVP-073 (parcial):** ensaio isolado PostgreSQL/MinIO aprovado em 22/10, com Flyway, RLS, SHA-256 e arquivo privado; backup 341 ms e restauração/verificações 4.003 ms em dados sintéticos. Falta validar reserva/comprovante vinculados na API restaurada, segredos, cópia externa e carga representativa. Runbook `runbooks/backup-e-restauracao.md`; não representa RPO/RTO de produção.
+- [ ] **MVP-074 (parcial):** 142 testes backend e sete verificações HTTP aprovados em 22/10. E2E autenticado de navegador, carga, teclado/leitor e revisão completa de mensagens pendentes.
 - [ ] **MVP-075:** completar runbooks de deploy, rollback, comprovante suspeito, pagamento tardio, email indisponivel, isolamento e trial vencido.
 
 **Saida:** release candidata com evidencias dos testes criticos.
@@ -136,3 +136,7 @@ Este backlog substitui a sequencia do roadmap original apenas onde a nova regra 
 ## Evidencias de execucao
 
 O checklist acima representa o escopo completo. Consulte [implementation-status.md](implementation-status.md) para entregas efetivamente implementadas, parciais e validadas em 23/09/2026; itens amplos nao devem ser marcados completos apenas pela existencia de scaffold.
+
+## Recuperação por código — entrega complementar em 22/10
+
+- [x] Reemissão profissional com verificação declarada de identidade, motivo, versão, intervalo mínimo e auditoria atômica (V026/ADR-0028). Código anterior e sessões vinculadas deixam de autorizar consultas; novo segredo entregue uma vez, sem mensagens externas. Homologação visual autenticada pendente.

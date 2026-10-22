@@ -1,0 +1,17 @@
+# ADR-0020 — Comprovantes privados e conferência pendente
+
+Data: 30/09/2026. Status: aceita.
+
+MVP-062/063 recebem JPEG, PNG e PDF até 5 MB por POST binário com CSRF, sessão de cliente verificado e propriedade da reserva. Nome, extensão e MIME fornecidos pelo cliente não são autoridade. A API limita leitura antes da validação; identifica/decodifica imagens (até 16 megapixels), reencoda PNG sem metadados usando buffers de memória, e interpreta PDFs sem senha, até dez páginas, rejeitando ações ativas e anexos. Validação não é antivírus nem atesta autenticidade bancária; processamento isolado/antimalware de produção permanece na homologação.
+
+Implementação usa [PDFBox 3.0.8](https://pdfbox.apache.org/download.html) e [MinIO Java SDK 9.0.3](https://github.com/minio/minio-java), com artefato JVM do OkHttp 5.3.2 para Maven. Nenhum comprovante é escrito no disco do container da API. Bucket S3/MinIO dedicado, sem política pública; implementação rejeita bucket com política configurada e não gera URLs públicas/presigned. Chaves aleatórias com tenant/reserva/UUID, nunca nome original.
+
+Sob lock do tenant, valida propriedade, estado/prazo e limite de cinco arquivos; hash SHA-256 do conteúdo original identifica repetição sem duplicação. Grava objeto privado e metadados, revalida prazo após I/O e muda estado na mesma transação de banco. Rollback tenta remover objeto novo; falha registra somente UUID. Queda abrupta entre S3 e commit pode deixar órfão privado: diagnóstico/reconciliação operacional obrigatório (não remover objetos referenciados). Não há transação distribuída nem coletor automático de órfãos nesta entrega.
+
+Primeiro comprovante aceito antes do prazo inicial abre IN_REVIEW por 24 horas, mantém quota HELD e estende a alocação para esse prazo de análise. Reenvios não renovam o prazo. Data original de pagamento permanece preservada, com review_expires_at separado. Repetição do mesmo conteúdo retorna ID/estado atual, inclusive após expiração, sem reabrir a reserva. Worker e limpeza síncrona expiram IN_REVIEW pelo prazo de análise, liberando horário/quota. Nenhum upload confirma recebimento ou atendimento.
+
+V017 amplia estados de reserva/intenção, adiciona review_expires_at e unicidade tenant/intent/hash. A lista privada de pagamento inclui metadados dos arquivos; download exige propriedade e é servido como attachment com no-store, nosniff e CSP sandbox, sem revelar chave S3. Calendário/portal identificam Em conferência. Não há endpoint administrativo de conferência nesta entrega.
+
+paymentAvailable permanece false até MVP-064/065; interface permite testar envio e orienta não transferir nesta etapa. Próximas tarefas: painel profissional de conferência, consulta do comprovante pelo operador autorizado, registro manual do recebimento e confirmação somente com entrada suficiente. Nenhuma transferência ou comunicação externa foi executada nesta implementação. Mudança para nome/sobrenome/telefone permanece adiada.
+
+Infraestrutura local: os registros Docker Hub/Quay recusaram as imagens prontas durante a validação. O Compose constrói o servidor a partir do [código oficial MinIO](https://github.com/minio/minio), fixado no commit 7aac2a2c5b7c882e68c1ce017d8256be2feea27f, preservando a licença AGPL na imagem. A compilação inicial requer rede e pode demorar; testes de armazenamento usam a mesma imagem local. Esta solução de desenvolvimento não define a distribuição/operacionalização do storage em produção.

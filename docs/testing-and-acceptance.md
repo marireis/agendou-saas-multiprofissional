@@ -89,3 +89,16 @@
 - Relatorio de acessibilidade.
 - Registro de carga com massa usada.
 - ADRs aprovadas para decisoes comerciais e tecnicas.
+
+## Evidência de 22/10/2026 — revisão HTTP e suíte completa
+
+- Backend: 36 unitários + 106 integrações, zero falhas/erros/ignorados, `apps/api/hardening-full-verify.log`. Abrange MinIO real e PostgreSQL com papel runtime/RLS, identidade/MFA, assinatura, agenda e jornada de reserva até pagamento/gestão/recuperação.
+- Build de produção/TypeScript aprovado em `apps/web/hardening-final-build.log`.
+- `infra/local/verify-http-security.ps1`: sete verificações aprovadas, páginas com política de privacidade e acesso anônimo privado rejeitado diretamente e via proxy. Evidência `.local/hardening-http-check.log`.
+- O runner registrou timeout de fechamento da JVM após os testes concluídos; Maven passou. Revisar encerramento dos contextos Spring/Hikari nos testes. Não repetir a suíte completa sem mudança/falha adicional apenas para esconder esse aviso.
+- Esta rodada NÃO valida navegabilidade autenticada, acessibilidade, carga, restore, exportação/exclusão, TLS/ingress ou entrega externa de mensagens. Gates de piloto permanecem abertos.
+
+
+## Ensaio de recuperação — 22/10/2026
+
+`BackupRestoreIT` aprovado: esquema completo até V026, dois tenants, um cliente, dump PostgreSQL e um PNG privado restaurados em contêineres isolados. Verifica Flyway, RLS, permissões runtime, hashes e recusa de acesso anônimo; simula perda de uma gravação após o snapshot. Mesmo cenário executado por Surefire e Failsafe, sem falhas (um teste distinto). Log `apps/api/backup-restore-verify.log`; medição no `target/backup-restore-report.txt`: backup 341 ms, recuperação de infraestrutura/verificações 4.003 ms. Não inclui aplicação restaurada, vínculo reserva/comprovante, segredos ou volume realista. MVP-073 parcial; procedimento e próximos critérios em [backup e restauração](runbooks/backup-e-restauracao.md).

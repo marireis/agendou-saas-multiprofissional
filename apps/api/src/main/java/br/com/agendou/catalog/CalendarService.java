@@ -22,7 +22,7 @@ public class CalendarService {
  private void expire(){jdbc.update("UPDATE calendar_allocations SET active=false,released_at=? WHERE tenant_id=? AND active AND expires_at<=?",Timestamp.from(clock.instant()),TenantContext.require(),Timestamp.from(clock.instant()));}
  // Call after the shared tenant lock, before changing hours or timezone.
  public void requireNoFutureHolds(){
-  if(jdbc.queryForObject("SELECT count(*) FROM calendar_allocations WHERE tenant_id=? AND kind='HOLD' AND active AND expires_at>? AND ends_at>?",Long.class,TenantContext.require(),Timestamp.from(clock.instant()),Timestamp.from(clock.instant()))>0)conflict("Há horários temporariamente ocupados. Aguarde a liberação antes de alterar o expediente ou o fuso.");
+  if(jdbc.queryForObject("SELECT count(*) FROM calendar_allocations WHERE tenant_id=? AND kind IN ('HOLD','BOOKING') AND active AND (expires_at IS NULL OR expires_at>?) AND ends_at>?",Long.class,TenantContext.require(),Timestamp.from(clock.instant()),Timestamp.from(clock.instant()))>0)conflict("Há atendimentos ou reservas em andamento. Resolva essas ocupações antes de alterar o expediente ou o fuso.");
  }
  /** Internal primitive only: booking identity, quota, payment snapshots and idempotency come in MVP-050+. */
  @Transactional public UUID hold(UUID serviceId,Instant start)throws Exception{

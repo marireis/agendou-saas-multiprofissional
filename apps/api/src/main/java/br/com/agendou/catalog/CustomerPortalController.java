@@ -20,6 +20,14 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/public/{slug}/client")
 public class CustomerPortalController {
+ public record CodeAccess(@NotBlank @Size(max=50) String firstName,@NotBlank @Size(max=49) String lastName,@NotBlank @Size(max=25) String phone,@NotBlank @Pattern(regexp="[A-Za-z0-9_-]{43}") String code){@Override public String toString(){return "CodeAccess[redacted]";}}
+ @PostMapping("/code") @Transactional public ResponseEntity<?> codeAccess(@PathVariable String slug,@Valid @RequestBody CodeAccess body,HttpServletRequest request){
+  String phone=CustomerContact.phone(body.phone()),name=CustomerContact.key(CustomerContact.name(body.firstName())+" "+CustomerContact.name(body.lastName())),hash=CustomerContact.hash(body.code());limiter.checkAccount("phone-access:"+slug+":"+phone,true);
+  try{UUID tenant=jdbc.queryForObject("SELECT public.resolve_booking_code_tenant(?,?)",UUID.class,slug,hash);if(tenant==null)throw invalidCode();TenantContext.set(tenant);tenants.applyCurrentTenant();if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM booking_access_codes WHERE tenant_id=? AND code_hash=? AND name_key=? AND phone=?)",Boolean.class,tenant,hash,name,phone)))throw invalidCode();
+   request.getSession(true);request.changeSessionId();request.getSession().setAttribute("customerPortal",new Access(slug,"code:"+hash,clock.instant().plusSeconds(3600)));return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Map.of("message","Acesso à reserva liberado."));
+  }finally{TenantContext.clear();}
+ }
+ private static ResponseStatusException invalidCode(){return new ResponseStatusException(HttpStatus.BAD_REQUEST,"Dados ou código não conferem. Use os dados informados ao reservar.");}
  private final JdbcTemplate jdbc;
  private final TenantSessionConfigurer tenants;
  private final AuthRateLimiter limiter;
@@ -70,7 +78,7 @@ public class CustomerPortalController {
  }
  private Access verified(String slug,HttpServletRequest request){
   var session=request.getSession(false);var value=session==null?null:session.getAttribute("customerPortal");
-  if(!(value instanceof Access access)||!access.slug().equals(slug)||!clock.instant().isBefore(access.expiresAt()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Verifique seu email para acessar seus agendamentos.");
+  if(!(value instanceof Access access)||!access.slug().equals(slug)||!clock.instant().isBefore(access.expiresAt()))throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Informe seus dados e código para acessar seus agendamentos.");
   return access;
  }
  @GetMapping("/bookings") public ResponseEntity<?> list(@PathVariable String slug,@RequestParam(defaultValue="0") int offset,HttpServletRequest request){
@@ -86,9 +94,20 @@ public class CustomerPortalController {
   var access=verified(slug,request);
   return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(bookings.paymentForCustomer(slug,access.email(),id));
  }
+ @PostMapping(value="/bookings/{id}/evidence",consumes="application/octet-stream") public ResponseEntity<?> upload(@PathVariable String slug,@PathVariable UUID id,HttpServletRequest request)throws java.io.IOException{
+  var access=verified(slug,request);
+  if(request.getContentLengthLong()>EvidenceValidator.MAX)throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"Envie até 5 MB.");
+  byte[] bytes=request.getInputStream().readNBytes(EvidenceValidator.MAX+1);
+  if(bytes.length>EvidenceValidator.MAX)throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"Envie até 5 MB.");
+  return ResponseEntity.status(201).cacheControl(CacheControl.noStore()).body(bookings.uploadEvidence(slug,access.email(),id,bytes));
+ }
+ @GetMapping("/bookings/{id}/evidence/{evidence}") public ResponseEntity<byte[]> download(@PathVariable String slug,@PathVariable UUID id,@PathVariable UUID evidence,HttpServletRequest request){
+  var access=verified(slug,request);var file=bookings.downloadEvidence(slug,access.email(),id,evidence);
+  return ResponseEntity.ok().cacheControl(CacheControl.noStore()).header("X-Content-Type-Options","nosniff").header("Content-Security-Policy","sandbox").header("Content-Disposition","attachment; filename=\"comprovante-"+evidence+(file.mediaType().equals("application/pdf")?".pdf":".png")+"\"").contentType(MediaType.parseMediaType(file.mediaType())).body(file.bytes());
+ }
  @PostMapping("/logout") public ResponseEntity<?> logout(@PathVariable String slug,HttpServletRequest request){
   var session=request.getSession(false);
-  if(session!=null){session.removeAttribute("customerPortal");session.removeAttribute("customerReview");session.removeAttribute("customerBookingReceipt");}
+  if(session!=null){session.removeAttribute("customerPortal");session.removeAttribute("customerReview");session.removeAttribute("customerBookingReceipt");session.removeAttribute("phoneReview");session.removeAttribute("phoneReceipt");}
   return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
  }
  private static ResponseStatusException invalid(){return new ResponseStatusException(HttpStatus.BAD_REQUEST,"Link inválido ou expirado. Solicite outro email.");}

@@ -8,7 +8,7 @@ Com superadmin/MFA, prefira iniciar pela raiz: `powershell -NoProfile -File infr
 
 ```powershell
 $env:JAVA_HOME = 'C:\Users\maryn\.jdks\corretto-21.0.5'
-docker compose -f infra/local/compose.yaml up -d postgres mailpit
+docker compose -f infra/local/compose.yaml up -d --build postgres mailpit minio
 cd apps/api
 $env:AGENDOU_SECURE_COOKIE = 'false' # apenas HTTP local
 .\mvnw.cmd spring-boot:run
@@ -24,7 +24,7 @@ npm ci
 npm run dev
 ```
 
-Abrir http://localhost:3000/cadastro. Criar conta de teste, abrir o email no Mailpit em http://localhost:8025, confirmar e entrar. O painel permite consultar assinatura e editar nome, descricao e fuso. A pagina publica e a reserva ainda nao estao implementadas.
+Abrir http://localhost:3000/cadastro. Criar conta de teste, abrir o email no Mailpit em http://localhost:8025, confirmar e entrar. O painel permite configurar perfil, serviços, horários e publicação. Reservas e acesso verificado do cliente estão implementados; confirmação manual do pagamento está disponível na aba Conferência.
 
 Next encaminha `/api/*` para localhost:8080, preservando a mesma origem do cookie. `AGENDOU_API_URL` altera o destino. `AGENDOU_PUBLIC_URL` configura a origem dos links de email. Nao colocar segredos no frontend.
 
@@ -108,3 +108,75 @@ Validação: 27 unitários e 30 integrações passaram (expiration-verify.log). 
 ### Base PIX e prévia (29/09)
 V016 cria intenção para reservas existentes sem renovar prazo; novas reservas criam intenção atomicamente. No recibo ou detalhe de Meus agendamentos, Ver dados PIX da reserva abre valores, chave/recebedor e prazo preservados. Copiar chave tem seleção manual como alternativa. Ao expirar, a chave é ocultada. Tela está em prévia: não realizar transferência; comprovantes/conferência ainda pendentes.
 27 unitários e 27 integrações aprovados (pix-foundation-verify.log); build e typecheck aprovados (pix-foundation-build.log). Homologação visual autenticada/clipboard pendente. Reinício pelo start-api.ps1, log pix-foundation-local.log. Próxima tarefa: MVP-062/063, comprovantes privados e EmConferencia.
+
+### Comprovantes privados — 30/09/2026
+V017 é aplicada ao reiniciar a API pelo script local. Docker Desktop deve estar aberto. Na raiz, execute `docker compose -f infra/local/compose.yaml up -d --build postgres mailpit minio`. A primeira compilação do MinIO usa código oficial fixado em revisão no Dockerfile e pode levar vários minutos; depois a imagem fica em cache. Antes de executar `mvnw.cmd verify` numa máquina nova, construa essa imagem: o teste S3EvidenceStorageIT usa `agendou-minio-local:7aac2a2`.
+
+Storage local: API S3 em localhost:9000, console em localhost:9001, credenciais de desenvolvimento definidas no Compose. Variáveis da API: AGENDOU_STORAGE_ENDPOINT, AGENDOU_STORAGE_ACCESS_KEY, AGENDOU_STORAGE_SECRET_KEY e AGENDOU_STORAGE_BUCKET. Padrão: bucket agendou-evidence-private, criado no primeiro upload; não configure políticas públicas. Não use essas credenciais em produção. Produção requer endpoint TLS, credenciais próprias de menor privilégio, bloqueio de acesso público e revisão de segurança/processamento de arquivos. Backup deve incluir banco e objetos privados.
+
+Em Meus agendamentos → detalhes/pagamento, envie JPEG/PNG/PDF até 5 MB. PDFs sem senha, até dez páginas e sem conteúdo ativo; imagens até 16 megapixels são reencodadas sem metadados. Máximo cinco arquivos por reserva. Primeiro envio válido abre Em conferência por 24h, preservando horário; outros arquivos não renovam o prazo. Download exige sessão proprietária. Arquivo nunca comprova recebimento automaticamente: transferência operacional permanece desabilitada até MVP-064/065.
+
+503 no upload: verifique serviço MinIO, credenciais e bucket sem policy configurada. Rollback tenta remover o objeto novo; falha de processo pode deixar objeto privado órfão. Não há coletor automático: reconcilie inventário S3 com payment_evidence usando acesso operacional autorizado e janela sem uploads em andamento; nunca remova objetos referenciados. Revisão visual autenticada da interface permanece para homologação.
+
+### Conferência e devoluções — 01/10/2026
+Inicie os serviços Docker e reinicie a API usando infra/local/start-api.ps1; V018/V019 preservam dados existentes. Acesse `/painel/conferencia`. Reservas Em conferência aparecem primeiro. Abra a reserva, baixe o comprovante, confira o crédito no banco e registre valor, conta, referência e data. Valores no formulário são em reais; API/banco usam centavos. Data/hora de entrada usam o fuso do dispositivo, explicitado na tela; datas consultadas seguem o fuso do estabelecimento.
+
+Entrada suficiente sem excedente e reserva válida confirma o atendimento. Calendário e Meus agendamentos passam a mostrar Confirmado. Parcial não renova prazo; excedente exige regularização. Recebimento registrado após expiração permanece associado ao histórico financeiro sem recuperar horário. Para devolver, realize a transferência no banco e registre sua referência/motivo/data, selecionando o crédito original. Não registre devolução antes de efetuá-la. O sistema apenas registra a operação externa.
+
+409 de referência: consulte o histórico antes de tentar outra referência. Repetir todos os dados exatos retorna o lançamento existente; alterar dados com a mesma referência é rejeitado. Devolução não pode ultrapassar o saldo do crédito original. Devolução que comprometa a entrada de atendimento confirmado aguarda MVP-067 (cancelamento/política); não contorne isso editando o banco. Conta bloqueada mantém consultas mas não registros financeiros. Histórico inclui operador e correlation ID, sem edição/exclusão pela API. Não há email novo de confirmação nesta entrega; cliente consulta seu portal.
+
+Validação desta entrega: 69 testes distintos (32 unitários, 28 PublicPageJourneyIT, 9 CalendarJourneyIT). Jornada final aprovada em review-public-verify.log; calendário aprovado em review-final-verify.log, cuja falha de fixture da jornada foi corrigida no rerun. Inclui rollback atômico, acesso cruzado negado, repetição sem duplicação, insuficiência/excedente, tardio sem reabertura, limite de devolução concorrente e bloqueio de escrita após trial. Build review-final-build.log e typecheck aprovados; V018/V019 aplicadas localmente, health UP e /painel/conferencia HTTP 200. Homologação visual autenticada pendente.
+
+### Cancelamento profissional — 01/10/2026
+Na aba Conferência, abra Gerenciar reserva → Cancelar atendimento. Leia a política original aceita pelo cliente, informe motivo visível ao cliente e valor a devolver (zero quando não houver), marque a revisão e confirme. A política é texto livre: a aplicação não calcula percentuais/prazos. Só é possível cancelar reserva ativa antes do início. Cancelamento libera o horário imediatamente no servidor; calendário reflete na próxima atualização.
+
+O formulário compara o recebido líquido exibido com o atual. Em 409 por valores alterados, use Atualizar reserva e revise a decisão. Repetição idêntica é segura; decisão registrada não pode ser editada nesta etapa. Quota provisória é liberada; reserva já confirmada conserva quota comercial consumida. Dados financeiros, evidências e auditoria são preservados.
+
+Se houver devolução pendente, faça no banco e registre pelo formulário existente, dentro do limite da decisão e do recebimento original. Crédito recebido depois do cancelamento aumenta a pendência, sem reabrir o horário. Portal mostra Cancelada, motivo, valor mantido e pendência; dados PIX e upload ficam ocultos. Não envia email novo nem executa transferência. Cancelamento pelo cliente ainda não disponível.
+
+V020 aplicada ao reiniciar pelo script local. Testes: 32 unitários + 31 jornada + 9 calendário = 72 aprovados, incluindo rollback, acesso cruzado, saldo desatualizado, repetição, devolução planejada, pagamento posterior e reutilização do horário. Build/typecheck aprovados (cancellation-verify.log/cancellation-build.log). Homologação visual autenticada pendente.
+
+### Reagendamento — 05/10/2026
+Em Conferência → Gerenciar reserva → Reagendar o mesmo serviço, escolha a data, busque horários, selecione a opção e informe motivo visível ao cliente. Horários seguem o fuso da reserva, antecedência de 24h e horizonte de 60 dias. Valores, duração/buffers contratados, recebimentos e prazo original são mantidos; serviço inativado posteriormente ainda pode ser reagendado conforme contrato original. Horário antigo só é liberado se o novo puder ser reservado.
+
+409: atualize a reserva/consulte horários; pode haver nova ocupação, alteração em outra janela ou quota do mês de destino atingida. Após falha de rede, repetir os mesmos dados/chave é seguro; consulte o histórico antes de criar outra alteração. Profissional e cliente veem datas anteriores/novas e motivo. Não envia email de alteração nesta entrega (MVP-068).
+
+V021 aplica pelo script local. Reagendamento permitido apenas antes do início, em reserva ativa; expiradas/canceladas não são reabertas. Histórico preservado sob RLS; quota move de mês sem nova cobrança e preserva HELD/COMMITTED. Próxima etapa: concluir atendimento e marcar falta.
+
+Validação de reagendamento: 75 testes (32 unitários + 34 jornada + 9 calendário), sem falhas/ignorados; inclui concorrência, conflito, rollback do histórico, repetição, versão desatualizada, quota de destino e duração/preço originais após mudança do catálogo. Build/typecheck aprovados; V021 aplicada localmente, API health UP e Conferência HTTP 200. Logs reschedule-final-verify.log, reschedule-build.log, reschedule-local.log. Homologação visual autenticada pendente.
+
+### Concluir atendimento e marcar falta — 05/10/2026
+Em Conferência → Gerenciar reserva, abra Concluir atendimento ou marcar falta. Após o término previsto, escolha o resultado, informe observação visível ao cliente e confirme. Somente atendimento confirmado pode ser encerrado; antes do término a API recusa, inclusive para falta. Se houve reagendamento, atualize a reserva e reveja o horário antes de registrar.
+
+Resultado é definitivo nesta etapa: repetir os mesmos dados não duplica; resultado/observação diferente recebe conflito. Não há edição ou reabertura. Histórico no calendário e quota comercial são preservados. Encerramento não quita saldo, registra multa, cancela pagamento ou executa devolução. Lançamentos financeiros seguem na aba Conferência. Cliente consulta resultado/observação no portal; emails ainda pertencem à etapa MVP-068.
+
+V022 aplica pelo script local. Validação: 78 testes (32 unitários + 37 jornada + 9 calendário), com término/status, versão desatualizada, CSRF/isolamento, repetição, decisões concorrentes e rollback da auditoria. Build e typecheck aprovados; logs outcomes-verify.log/outcomes-build.log. Homologação visual autenticada pendente.
+
+## Agendamento público sem email — 06/10/2026
+
+1. No painel, configure serviço, PIX/política e horários futuros; publique em Publicação. Copie o link em Compartilhar.
+2. Abra `/a/{slug}/agendar` em janela anônima, sem entrar no painel. Selecione serviço, data e horário; informe nome, sobrenome e telefone com DDD. Revise valores/política e solicite a reserva temporária.
+3. Copie o código privado exibido no recibo. O código autoriza somente essa reserva; não é o protocolo UUID. Não há envio por email/WhatsApp/SMS. O recibo fica recuperável na mesma sessão por uma hora, até sair.
+4. Abra `/a/{slug}/meus-agendamentos` em outra janela. Informe os mesmos dados de contato e o código. Confira status/detalhe/PIX. Tentar outro código ou nome/telefone deve falhar. Reservas distintas exigem seus próprios códigos.
+5. Na aba Clientes, consulte o cadastro e histórico; na Conferência, registre somente recebimentos efetivamente conferidos. A solicitação não confirma atendimento automaticamente. Use a seção de email em Meus agendamentos apenas para reservas antigas.
+6. Reserva assistida: Clientes → Novo cliente, nome e sobrenome + telefone, email vazio → Ver cliente e agendar. Entregue ao cliente o código exibido ao finalizar. Sem o código, o profissional deve verificar o solicitante e consultar o atendimento; reemissão/recuperação automática de código ainda não existe.
+
+V023/V024 preservam dados anteriores. Não mesclam histórico antigo de email com novo cadastro sem email. Edite contato administrativo com cuidado: acesso por código usa os dados originais de cada reserva. Não coloque códigos reais em prints/logs/documentação.
+
+## Notificações internas (V025)
+
+Após reiniciar a API pelo script local, entre com uma conta de administrador e abra `/painel/notificacoes`. Reservas já existentes também aparecem. Filtre não lidas, marque um aviso e confira que ele desaparece desse filtro; em Todos deve continuar como Lida. Outro administrador deve manter seu próprio estado de leitura. Ver atendimento deve abrir o detalhe correspondente na Conferência. Use Atualizar para buscar eventos novos; não há push nem mensagens externas nesta etapa.
+
+A migração é aditiva e preserva reservas e códigos. Para validar tecnicamente, execute `mvnw.cmd verify -Dit.test=PublicPageJourneyIT` em `apps/api` com Docker ativo. A suíte cobre autorização, CSRF, isolamento, leitura individual/idempotente, cursor com timestamps iguais e jornada de reservas/pagamentos. Build em `apps/web` verifica a rota nova. A revisão visual autenticada deve incluir temas claro/escuro e celular.
+
+## Financeiro
+
+Reinicie a API para carregar `/admin/finance` e entre em `/painel/financeiro`. Selecione o período e confira Movimentações (datas do recebimento/devolução) e Pendências (datas dos atendimentos, com posição financeira atual). Um reembolso no período de recebimento anterior pode gerar líquido negativo. Entrada pendente já está incluída no total restante. Ver atendimento abre a Conferência; valores não são editados pelo relatório. Homologue com conta de teste nos temas claro/escuro e celular.
+
+## Recuperação de código (V026)
+
+Reinicie a API pelo script local para aplicar V026. Em Conferência, abra uma reserva por telefone e consulte Acesso do cliente. Confirme a identidade por contato confiável/presencial, informe motivo e confirme a invalidação antes de emitir. Entregue o novo código somente ao cliente verificado; use os dados originais exibidos para acessar o portal. Ele fica visível por até cinco minutos e não pode ser consultado novamente. Perda da resposta exige atualizar a consulta e emitir novamente após um minuto. Teste que código/sessão/recibo antigos não acessam reserva, PIX ou comprovantes, enquanto o código novo funciona. Não execute esse teste em reserva real sem solicitação do cliente. Legados por email mantêm solicitação de novo link.
+
+## Homologação HTTP
+
+Com API/frontend ativos, execute `powershell -NoProfile -File infra/local/verify-http-security.ps1`. O script só consulta endpoints e valida cabeçalhos/status, sem criar registros. Para validar o artefato de produção, pare o dev server, execute `npm run build` e `npm run start` em `apps/web`. Não mantenha duas instâncias na porta 3000. Em 22/10 foi deixado o frontend em modo produção local; para voltar ao desenvolvimento, pare-o e execute `npm run dev`. Checklist e limites em [privacidade e segurança](privacidade-e-seguranca.md).

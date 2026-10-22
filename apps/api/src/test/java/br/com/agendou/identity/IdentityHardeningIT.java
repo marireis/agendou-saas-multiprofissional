@@ -67,6 +67,22 @@ class IdentityHardeningIT {
         reset(sender);
     }
 
+    @Test void privacyHeadersCoverSuccessUnauthorizedCsrfAndRateLimit() throws Exception {
+        mvc.perform(get("/api/v1/auth/csrf")).andExpect(status().isOk())
+            .andExpect(header().string("Referrer-Policy","no-referrer"))
+            .andExpect(header().string("X-Frame-Options","DENY"))
+            .andExpect(header().string("X-Content-Type-Options","nosniff"));
+        mvc.perform(get("/api/v1/admin/finance")).andExpect(status().isUnauthorized())
+            .andExpect(header().string("Referrer-Policy","no-referrer"))
+            .andExpect(header().string("Cache-Control",org.hamcrest.Matchers.containsString("no-store")));
+        mvc.perform(post("/api/v1/auth/login")).andExpect(status().isForbidden())
+            .andExpect(header().string("Referrer-Policy","no-referrer"));
+        String peer="192.0.2.77";for(int i=0;i<120;i++)limiter.checkPeer(peer);
+        mvc.perform(get("/api/v1/auth/csrf").with(request->{request.setRemoteAddr(peer);return request;}))
+            .andExpect(status().isTooManyRequests()).andExpect(header().string("Referrer-Policy","no-referrer"))
+            .andExpect(header().string("Cache-Control",org.hamcrest.Matchers.containsString("no-store")));
+    }
+
     @Test void expiredVerificationCanBeReissuedWithoutRestartingTrial() throws Exception {
         String email = register();
         String oldToken = token(email, "VERIFY");

@@ -1,6 +1,128 @@
 # Agendou - Status de implementação
 
-**Atualizado em:** 29/09/2026. Desenvolvimento na própria pasta do projeto.
+**Atualizado em:** 22/10/2026. Desenvolvimento na própria pasta do projeto.
+
+## Entrega em 22/10: ensaio isolado de backup e restauração (MVP-073 parcial)
+
+- Novo `BackupRestoreIT` cria quatro contêineres temporários, aplica as 26 migrations e restaura dump PostgreSQL e PNG privado em destinos vazios. Não acessa os dados/volumes do ambiente local. Dois tenants, um cliente e um arquivo sintéticos; nenhuma alteração de interface nesta etapa.
+- Verificados: validação Flyway, contagem de políticas/FORCE RLS/funções privilegiadas, permissões runtime e isolamento entre tenants, SHA-256 do dump/arquivo, bytes restaurados e recusa de acesso anônimo. Roles globais são provisionadas separadamente; proprietários/ACL do dump preservados.
+- Ensaio aprovado sem falhas/erros/ignorados, BUILD SUCCESS em `apps/api/backup-restore-verify.log`. O mesmo cenário executou duas vezes (Surefire e Failsafe por seleção explícita); não são dois testes distintos nem nova execução da suíte completa. Relatório da execução Failsafe: `apps/api/target/backup-restore-report.txt`.
+- Medição de 22/10: backup **341 ms**, inicialização/restauração dos destinos e verificações **4.003 ms**; dump 154.051 bytes e PNG 71 bytes. Snapshot tinha 359 ms no incidente simulado; uma gravação posterior ficou intencionalmente fora da recuperação. São medidas de infraestrutura sintética, não RPO/RTO de produção ou da aplicação completa.
+- Runbook `docs/runbooks/backup-e-restauracao.md` documenta execução, consistência banco/objetos, roles, chaves MFA, limites e critérios antes de liberar tráfego. MVP-073 continua parcial: faltam inventário completo de comprovantes, vínculo reserva/pagamento/arquivo e jornada na API restaurada, recuperação de segredos, cópia externa e volume representativo.
+- **Próxima etapa: ampliar a recuperação para uma reserva com comprovante vinculado e validar a API restaurada**, antes de considerar MVP-073 concluído. Depois retomar privacidade operacional (MVP-071), homologação autenticada/acessibilidade/carga, configuração de produção e piloto. Limites comerciais e provedor de mensagens seguem pendentes.
+
+## Entrega em 22/10: primeira rodada de homologação e proteção HTTP
+
+- Suíte completa `mvnw.cmd verify` aprovada: **142 testes** (36 unitários + 106 integrações), incluindo identidade, recuperação, MFA/superadmin, assinatura/trial, RLS, catálogo, agenda, reservas, pagamentos, financeiro, notificações, reemissão e MinIO real. Log `apps/api/hardening-full-verify.log`. Nenhum teste falhou ou foi ignorado. Isso não substitui E2E autenticado de navegador.
+- Páginas recebem Referrer-Policy no-referrer, X-Frame-Options DENY, nosniff, Permissions-Policy e CSP com base-uri/object-src/frame-ancestors/form-action. Cabeçalho X-Powered-By desabilitado. CSP **parcial**, sem restrição de scripts/styles nesta etapa; nonce/hash e validação de hidratação permanecem pendentes. API recebe no-referrer e DENY, preservando sandbox dos comprovantes.
+- Novo teste cobre cabeçalhos em sucesso, 401, CSRF negado e rate limit. Novo script `infra/local/verify-http-security.ps1` verifica páginas e acesso privado sem sessão na API e pelo proxy. Sete verificações HTTP aprovadas contra build de produção local; evidência `.local/hardening-http-check.log`.
+- Build/TypeScript aprovados em `apps/web/hardening-final-build.log`. Primeira execução detectou tipos gerados corrompidos em `.next/dev`; pasta preservada em `.local/next-before-hardening-20261022` e regenerada. API reiniciada e frontend executando o build de produção com `npm run start`, portas 8080/3000, dados/MFA preservados. Para editar com atualização automática, parar esse frontend e iniciar `npm run dev`.
+- Observação de infraestrutura de testes: após os testes aprovados, a JVM de testes excedeu 30 segundos no encerramento dos contextos Spring/Hikari e foi terminada pelo runner. Maven retornou BUILD SUCCESS. Dump em `apps/api/target/failsafe-reports/2026-10-22T08-47-07_067-jvmRun1.dump`; ciclo de fechamento dos recursos de teste ainda deve ser ajustado, sem tratar isso como falha funcional ou omitir o aviso.
+- Runbook `docs/runbooks/privacidade-e-seguranca.md` descreve atendimento verificado, correção cadastral e requisitos para exportação/exclusão. **MVP-071 não concluído:** exportação/exclusão operacional e política de retenção não implementadas. MVP-072/074 parciais: revisão técnica/testes API feitos, ainda faltam CSP completa, ingress/IP real, E2E navegador, acessibilidade e carga representativa.
+- **Próxima etapa: backup/restauração em ambiente isolado (MVP-073)**, medindo recuperação do banco e comprovantes sem sobrescrever o ambiente local. Depois concluir privacidade operacional, homologação de navegador, configuração de produção e piloto. Limites comerciais e canal/provedor de mensagens continuam pendentes.
+
+## Entrega em 22/10: reemissão profissional do código de acesso
+
+- Conferência → atendimento → Acesso do cliente permite consultar dados originais, confirmar a verificação de identidade, informar motivo e emitir outro código. Conhecer nome/telefone não basta: a verificação é responsabilidade do profissional por contato confiável ou presencialmente. A aplicação registra sua declaração, sem verificação externa automática.
+- ADMIN/tenant da sessão, CSRF e assinatura operacional exigidos para emitir. Consulta preservada após bloqueio. Versão impede duas emissões simultâneas/repetidas; intervalo mínimo de 60 segundos. V026 grava rotação/auditoria na mesma transação, com FKs compostas, FORCE RLS e operador/correlation ID. Falha de auditoria preserva o código anterior.
+- Novo segredo aleatório entregue uma vez na resposta no-store; somente hash persistido no domínio. Tela mantém o novo código em memória por até cinco minutos, permite copiar/ocultar e orienta entrega manual ao cliente verificado. Resposta perdida não pode ser recuperada: consultar versão e emitir novamente com nova confirmação/intervalo. Sem mensagens externas.
+- Código anterior deixa de autorizar consultas, inclusive de sessões já abertas, recibo original, PIX e comprovantes. Repetição da criação pública não devolve código revogado. Não apaga dados já baixados. Nome/telefone originais, reserva, horário e pagamentos permanecem iguais. Legados por email usam recuperação por link.
+- ADR-0028, contrato OpenAPI 0.28.0, modelo de dados e runbook atualizados. Retomada corrigiu a expectativa de um teste (400 → 422, padrão de validação da API), sem reduzir a exigência de confirmação. Build atual aprovado em `code-reissue-final-build.log`; OpenAPI validado como YAML. **87 testes aprovados** (36 unitários + 51 integrações da jornada pública) em `apps/api/code-reissue-final-verify.log`, incluindo três testes de reemissão: revogação de sessões/recibo/PIX/comprovantes e repetição da criação, isolamento, CSRF, confirmação, intervalo, versão, concorrência e rollback. V026 aplicada no banco local com dados/chave MFA preservados; API e frontend iniciados (`code-reissue-local-api.log`, `code-reissue-local-web.log`). Homologação visual autenticada pendente.
+- **Próxima etapa: homologação integrada das jornadas e revisão de privacidade/segurança (MVP-071/072/074)**. Limites comerciais dos planos ainda precisam de números definidos; WhatsApp/SMS externo depende de canal/provedor. Backup/restore e publicação/piloto continuam pendentes.
+
+## Entrega em 13/10: Financeiro do profissional (MVP-069)
+
+- Aba `/painel/financeiro` com período inclusivo no fuso atual do perfil, até 366 dias, visões Movimentações/Pendências, páginas de 50 itens e acesso ao atendimento na Conferência. Mês inicial do dispositivo; período/fuso aplicados explícitos. Layout responsivo usando o tema existente.
+- Recebimentos e devoluções pela data efetiva informada de cada lançamento; líquido pode ser negativo quando a devolução pertence a recebimento anterior. Totais abrangem todo o período, independentemente da página, sem duplicar créditos ao juntar devoluções.
+- Pendências selecionadas pela data atual do atendimento, considerando todo seu histórico financeiro. Entrada pendente é parte do restante previsto. Canceladas/expiradas não geram saldo a receber. Cancelamentos mostram devolução conforme valor retido; créditos em expiradas e excedentes pedem avaliação. Conclusão/falta não quitam o saldo. Expiração vencida é reconhecida mesmo antes do worker.
+- API de consulta exige ADMIN/tenant, usa RLS, no-store e REPEATABLE READ para resumo/página consistentes; disponível com assinatura bloqueada. Sem novas migrations, lançamentos, transferências ou alterações na assinatura. Valores derivados dos registros existentes; não é saldo bancário/lucro nem controle de despesas. ADR-0027/OpenAPI 0.27.0 atualizados.
+- Validação: **84 testes distintos aprovados** (36 unitários + 47 integrações da jornada em `finance-verify.log`, mais um cenário adicional de paginação em `finance-pagination-verify.log`). Cobrem somas, devoluções parciais, limites de data/fuso, filtro, isolamento, assinatura bloqueada, vencimento, pendências após conclusão/falta e paginação. Build final com TypeScript aprovado (`finance-final-build.log`); primeira tentativa encontrou arquivo de build bloqueado, resolvido ao parar/reiniciar o frontend. OpenAPI validado como YAML. Homologação visual autenticada pendente.
+- API/frontend reiniciados para teste local, dados/MFA preservados (`finance-local-api.log`, `finance-local-web.log`). Não houve mudança de esquema nesta etapa.
+- **Próxima etapa: recuperação/reemissão segura do código de acesso**, com procedimento profissional, invalidação do código anterior e auditoria. Depois definir limites comerciais dos planos e concluir homologação, privacidade, backup/restore e publicação. Mensagens externas MVP-068 continuam dependendo de canal/provedor.
+
+## Entrega em 13/10: central de notificações internas (MVP-068, primeira etapa)
+
+- Aba `/painel/notificacoes`: eventos de solicitação, comprovante recebido, confirmação, reagendamento, expiração, cancelamento, conclusão/falta, recebimento e devolução. Inclui histórico existente e reservas antigas por email; reserva assistida não duplica o aviso de solicitação.
+- Filtro de não lidas, contagem individual, marcação idempotente e paginação de 50 eventos por cursor data/id. Botão Ver atendimento abre a reserva na Conferência. Atualiza ao abrir, filtrar ou clicar em Atualizar; sem push/polling. Horário exibido é o atual da reserva, não um snapshot do horário no instante do evento.
+- V025 registra leitura por administrador com FKs compostas e FORCE RLS. ADMIN/tenant da sessão, CSRF e no-store; leitura não altera reserva, pagamento ou leitura de outro administrador. Consulta preservada com assinatura bloqueada. Sem exposição de telefone, email, código privado ou PIX na resposta dos avisos.
+- Cliente continua consultando o portal privado. **MVP-068 permanece parcial quanto a mensagens externas:** não houve integração/envio WhatsApp/SMS nem ampliação dos emails legados; depende de canal/provedor e regras de entrega. Recuperação do código também permanece pendente. ADR-0026, OpenAPI 0.26.0 e modelo de dados atualizados.
+- Durante a regressão, três testes existentes rejeitaram recebimento imediato por diferença entre relógios do banco e da aplicação. Criação da reserva passou a usar o mesmo Clock da aplicação utilizado na validação do recebimento, com precisão de microssegundos. Regressão reexecutada e aprovada; não flexibilizada a validação de datas.
+- Validação desta entrega: build final com TypeScript aprovado (`notifications-final-build.log`); typecheck isolado aprovado (`notifications-typecheck.log`); OpenAPI carregado como YAML. **81 testes aprovados** (36 unitários + 45 de integração da jornada pública, incluindo dois novos de notificações) em `apps/api/notifications-final-verify.log`. V025 aplicada no banco local com dados/MFA preservados; API health UP e página `/painel/notificacoes` HTTP 200. API e frontend iniciados para teste (`notifications-local-api.log` / `notifications-local-web.log`). Homologação visual autenticada desta nova aba pendente.
+- **Próxima implementação: aba Financeiro (MVP-069)**, consolidando recebimentos, saldos pendentes e devoluções por período. Retomar mensagens externas de MVP-068 quando canal e provedor forem definidos.
+
+## Entrega em 09/10: acabamento e validação visual do agendamento público
+
+- Último trabalho: melhoria visual do agendamento e de Meus agendamentos, mantendo o fluxo sem login/email e consulta por código. Cabeçalho com marca, cartões de serviços, indicador de etapas, resumo lateral e adaptação para celular implementados. Build com TypeScript aprovado em `apps/web/booking-design-build.log`.
+- Validação pelo navegador concluída em 09/10 com conta e contatos sintéticos locais: serviço → calendário → horário → nome/sobrenome/telefone → revisão → reserva → recibo → consulta privada. Conferidos desktop escuro, calendário/contato no celular escuro e recibo/portal no celular claro. Código incorreto recusado e código correto liberando somente a reserva correspondente. A assinatura da conta real, que havia bloqueado a conferência em 06/10, não foi alterada.
+- Melhorias desta etapa: foco e rolagem para revisão/recibo, respeitando redução de movimento; confirmação visível e anunciada ao copiar o código; resumo de data/hora usando o fuso preservado na revisão/reserva. Não houve pagamento nem mensagem externa real.
+- Docker/PostgreSQL/Mailpit/MinIO, API 8080 e frontend 3000 iniciados para teste local. Build de produção e typecheck aprovados em `apps/web/visual-qa-build.log` e `apps/web/visual-qa-typecheck-final.log`; typecheck isolado não concluiu e foi reexecutado fora do isolamento. Captura local do portal em `.local/visual-qa-portal.jpg` (dados sintéticos, arquivo não versionado). Esta verificação não substitui homologação administrativa, auditoria de acessibilidade ou E2E automatizado completo.
+- Os 88 testes aprovados da entrega funcional anterior continuam registrados abaixo; não foram reexecutados para o ajuste visual. Não houve nova mudança de backend nesta etapa.
+- Próxima etapa: revisar/implementar notificações MVP-068 para o modelo sem email, definindo o escopo de avisos internos e comunicação manual enquanto não houver provedor de mensagens; depois implementar Financeiro MVP-069; concluir privacidade, segurança, backup/restore, testes completos e publicação/piloto.
+- Pendências de produto: recuperação/reemissão de código ainda não implementada; limites mensais comerciais ainda não definidos. WhatsApp/SMS automático exige decisão de canal e integração; nenhum provedor está configurado.
+
+## Entrega em 06/10: agendamento público sem email, código privado e Clientes
+
+- Página e reserva públicas, sem conta/login: serviço → data → horário → nome, sobrenome e telefone com DDD → revisão. O pedido de substituir email deixou de estar adiado e foi implementado conforme escolha da responsável. Contato brasileiro validado/normalizado; aceite explícito de valores/política.
+- Recibo entrega código privado aleatório por reserva. Meus agendamentos pede os mesmos dados e esse código, com sessão de uma hora, CSRF, no-store e limites de tentativas. Código só libera a reserva correspondente, inclusive PIX/comprovantes; conhecer o telefone não libera histórico de terceiros. Banco de domínio guarda hash; segredo em claro fica temporariamente na sessão para recuperar o recibo. É preciso copiar/guardar; não há reemissão automática.
+- Clientes em `/painel/clientes`: cadastro, busca, edição versionada e histórico. Cadastro sem email exige telefone. Reserva assistida compartilha as regras de disponibilidade/quota/PIX e entrega código para repassar ao cliente quando não há email. Reserva continua temporária até conferência do profissional. MVP-067/MVP-070 concluídos; V023/V024 e ADR-0025.
+- Reservas antigas por email preservadas, com opção separada de acesso no portal. Sem mescla automática com cadastros por telefone. Alteração administrativa de contato não muda os dados originais exigidos pelo código de uma reserva. Não há envio WhatsApp/SMS ou email para reservas sem email.
+- Validação: **88 testes aprovados** (36 unitários + 43 jornada + 9 calendário), build e typecheck aprovados. `phone-booking-final-verify.log`, `phone-booking-build.log`, `phone-booking-typecheck.log`. Expectativa do teste pendente de rollback corrigida; rollback validado. Primeira execução dos novos testes ajustada para usar o cookie Spring Session real, sem mudança na autenticação de produção. OpenAPI 0.25.0 carregado como YAML.
+- V024 aplicada localmente com dados/chave MFA preservados. API health UP; páginas públicas de agendamento e consulta HTTP 200 sem login. `phone-booking-local.log` e `local-test-web.log`. Homologação visual/interativa pela responsável ainda pendente; testes automatizados usam contatos sintéticos.
+- **Próxima tarefa:** revisar/implementar notificações MVP-068 considerando reservas sem email e ausência de provedor WhatsApp/SMS; depois aba Financeiro MVP-069. Aguardar teste da responsável antes de seguir para novas funcionalidades.
+
+### Histórico do ponto de retomada anterior em 06/10
+
+
+- **Mudança de prioridade solicitada em 06/10:** substituir email obrigatório no agendamento público por nome, sobrenome e telefone com DDD, sem conta/login. Meus agendamentos deverá usar esses dados de contato; mecanismo adicional de confirmação de acesso em definição com a responsável (código WhatsApp/SMS ou código entregue na reserva), para não expor histórico a terceiros que conheçam o telefone. O pedido de telefone deixa de estar adiado; referências anteriores preservam o histórico. Ainda não implementado. Adequar também cadastro administrativo, vínculo das reservas existentes e plano de notificações. A página `/a/{slug}` e a disponibilidade já permitem acesso anônimo no código atual.
+
+- Código da aba `/painel/clientes` e endpoints de cadastro, busca, edição, histórico e reserva assistida implementados na pasta do projeto. V023 adiciona telefone opcional de contato, versão do cadastro e auditoria. Email verificado continua sendo a identificação do portal; alteração para telefone permanece adiada.
+- Reserva assistida segue serviço → data → horário → revisão, usa disponibilidade/quota e cria reserva temporária aguardando pagamento. Não confirma automaticamente nem envia novo email nesta etapa.
+- Build frontend aprovado em `apps/web/assisted-build.log`. Última execução Maven em `apps/api/assisted-verify.log`: 32 unitários e 48 integrações aprovados; uma integração falhou. O teste de rollback esperava uma exceção propagada, mas o tratamento HTTP devolveu 409. Corrigir a expectativa e executar novamente para verificar as asserções de rollback que ainda não foram alcançadas.
+- **Entrega ainda não concluída:** faltam finalizar a validação e atualizar contrato OpenAPI/ADR/backlog. Não considerar a nova aba homologada apenas pelo build.
+- Ambiente iniciado para teste manual em 06/10: Docker/PostgreSQL/Mailpit/MinIO ativos, V023 aplicada com sucesso no banco local, preservando dados e chave MFA. API na porta 8080 com health UP; frontend na porta 3000 e `/painel/clientes` HTTP 200; Mailpit e saúde MinIO HTTP 200. Logs `apps/api/local-test-api.log` e `apps/web/local-test-web.log`. Verificação de disponibilidade não substitui a homologação autenticada nem a integração pendente acima.
+- A responsável pediu executar e testar antes de avançar. Última entrega concluída permanece conclusão/falta (V022), descrita abaixo. Depois de finalizar e testar Clientes/reserva assistida, a próxima implementação será notificações MVP-068; em seguida Financeiro MVP-069 e homologação/deploy.
+
+## Entrega em 05/10: concluir atendimento e marcar falta (continuação de MVP-067)
+
+- Conferência → Gerenciar reserva permite registrar Concluído ou Não compareceu, após término previsto e somente em atendimento confirmado. Observação visível ao cliente e confirmação explícita. Versão do horário exige nova consulta após reagendamento.
+- Resultado, estado e evento são atômicos, com operador/auditoria/RLS. Repetição idêntica não duplica; duas decisões diferentes não sobrescrevem uma à outra. Não há edição/reabertura nesta etapa.
+- Calendário e área do cliente distinguem COMPLETED/NO_SHOW de confirmação/expiração. Pagamentos, devoluções, saldo, alocação histórica e quota COMMITTED preservados. Encerrar atendimento não quita saldo nem transfere dinheiro; intenção financeira permanece CONFIRMED.
+- V022 aplicada localmente sem apagar dados; API health UP e Conferência HTTP 200. OpenAPI 0.23.0/ADR-0024 atualizados. Validação: 78 testes aprovados (32 unitários + 37 jornada + 9 calendário), build e typecheck aprovados. Logs outcomes-verify.log/outcomes-build.log/outcomes-local.log. Homologação visual autenticada pendente.
+- **Próxima tarefa: reserva assistida com cadastro de clientes (MVP-067/MVP-070)**, seguida de notificações MVP-068 e aba Financeiro MVP-069. Identificação por telefone permanece adiada.
+
+## Entrega em 05/10: reagendamento do mesmo serviço (continuação de MVP-067)
+
+- Conferência → Gerenciar reserva → Reagendar o mesmo serviço: consulta por data e seleção de horários disponíveis no fuso do atendimento. Usa expediente, exceções/folgas, intervalos, buffers, antecedência de 24h e horizonte de 60 dias.
+- Serviço, duração original, preço, entrada, pagamentos, política e protocolo preservados. Troca de horário atômica: conflito mantém o horário anterior; não renova prazo de pagamento/conferência. Versão impede sobrescrita desatualizada e chave idempotente impede execução repetida.
+- Mudança de mês transfere a quota HELD/COMMITTED e valida o limite do plano no destino. Histórico anterior/novo e motivo visíveis ao profissional e ao cliente; operador/correlation ID internos. Calendário consulta o novo horário. V021/ADR-0023 e OpenAPI 0.22.0.
+- Validação: 75 testes aprovados (32 unitários + 34 jornada + 9 calendário), build e typecheck aprovados. Logs reschedule-final-verify.log/reschedule-build.log. V021 aplicada no banco local sem apagar dados, API health UP e rota Conferência HTTP 200 (reschedule-local.log). Homologação visual autenticada pendente.
+- **Próxima tarefa: concluir atendimento e marcar falta (MVP-067)**; depois reserva assistida/cadastro de clientes, notificações MVP-068 e Financeiro MVP-069. Identificação por telefone permanece adiada.
+
+## Entrega em 01/10: cancelamento profissional (primeira parte de MVP-067)
+
+- Em Conferência → Gerenciar reserva, o profissional consulta a política original, informa motivo visível ao cliente e valor a devolver, e confirma a revisão. Política textual não é interpretada automaticamente. Saldo desatualizado exige nova consulta antes de cancelar.
+- Cancelamento antes do início do atendimento, sob lock e com auditoria, muda reserva/intenção para CANCELED e libera o horário na mesma transação. Não apaga comprovantes/lançamentos. Quota HELD liberada; COMMITTED de reserva confirmada preservada. Repetição idêntica não duplica decisão/evento.
+- Devolução da entrada passa a ser permitida após cancelamento, limitada à decisão e ao crédito original. Pendência é recalculada com devoluções/recebimentos posteriores; nenhum lançamento reabre reserva cancelada. Não há transferência automática. Cliente visualiza motivo, valor mantido e devolução pendente, sem PIX/upload nem contagem de expiração.
+- V020, OpenAPI 0.21.0 e ADR-0022. Validação: 72 testes aprovados (32 unitários + 31 jornada + 9 calendário), build e typecheck aprovados. Logs cancellation-verify.log/cancellation-build.log. V020 aplicada no banco local sem apagar dados, API health UP e rota Conferência HTTP 200 (cancellation-local.log). Homologação visual autenticada pendente.
+- **Próxima tarefa: reagendamento do mesmo serviço (continuação de MVP-067)**, com checagem de disponibilidade e preservação do histórico/pagamentos. Depois conclusão/falta e reserva assistida/cadastro de clientes. Cancelamento pelo próprio cliente e emails automáticos não fazem parte desta entrega; notificações em MVP-068. Mudança de identificação para telefone segue adiada.
+
+## Entrega em 01/10: conferência, confirmação e pendências financeiras (MVP-064/065/066)
+
+- Aba Conferência em `/painel/conferencia`: reservas priorizadas por estado, detalhe, comprovantes privados, recebimentos e devoluções. Operador registra valor, conta, referência bancária e data, com declaração de conferência no banco.
+- Confirmação transacional exige entrada líquida suficiente, sem excedente, prazo válido e HOLD ativo. Reserva/intenção CONFIRMED, alocação BOOKING sem expiração e quota COMMITTED. Portal e calendário identificam confirmação sem confundir com prazo original vencido. PIX deixa o modo prévia para reservas pendentes.
+- Referências normalizadas únicas por tenant; repetição idêntica não duplica. Insuficiência/excesso/tardio/devolvido são pendências financeiras derivadas dos lançamentos, separadas da agenda. Recebimento tardio não reabre reserva nem ocupa horário de terceiro.
+- Devolução manual vinculada ao crédito original, limite cumulativo sob lock, referência/data/motivo/operador e auditoria. Não executa transferência. Devolução abaixo da entrada de atendimento confirmado depende do cancelamento/política em MVP-067; não há edição de lançamentos nem email novo de confirmação.
+- V018/V019 aplicadas no banco local sem apagar dados; API health UP e rota Conferência HTTP 200. OpenAPI 0.20.0 e ADR-0021 atualizados. Validação: 32 unitários + 28 integrações da jornada + 9 do calendário = 69 testes distintos aprovados. Após corrigir um horário inválido na fixture, a jornada completa passou em review-public-verify.log; calendário passou em review-final-verify.log. Build (review-final-build.log) e typecheck aprovados. Homologação visual autenticada pendente.
+- **Próxima tarefa: MVP-067 — gestão dos atendimentos**, iniciando pelo cancelamento com política e devolução aplicável; depois reagendamento, conclusão/falta e reserva assistida, acompanhada do cadastro de clientes. A identificação por nome/sobrenome/telefone continua adiada conforme solicitado.
+## Entrega em 30/09: comprovantes e Em conferência (MVP-062/063)
+
+- Upload privado de JPEG/PNG/PDF até 5 MB, sessão de cliente/propriedade/CSRF e leitura limitada. Validação por conteúdo, imagens reencodadas sem metadados até 16 megapixels e PDF sem senha/conteúdo ativo até dez páginas. Até cinco comprovantes por reserva; mesmo conteúdo não duplica arquivo/registro.
+- Objetos em bucket S3/MinIO dedicado, sem URL pública; metadados com RLS e download autorizado como attachment/no-store/nosniff. Nenhum comprovante gravado no disco da API. Rollback remove objeto novo; interrupção abrupta pode deixar órfão privado para reconciliação operacional (ADR-0020).
+- Primeiro envio dentro do prazo muda reserva/intenção para IN_REVIEW por 24 horas, mantém horário e quota provisória. Reenvio não renova prazo. Worker/limpeza síncrona expiram pelo prazo de análise; upload nunca confirma recebimento ou atendimento.
+- Recibo e Meus agendamentos permitem envio/listagem/download; calendário identifica Em conferência. Conferência profissional ainda não está disponível, portanto a interface continua orientando não transferir nesta etapa.
+- V017 aplicada no banco local sem apagar dados; OpenAPI 0.19.0 e ADR-0020 atualizados. Validação: 32 testes unitários + 33 de integração da jornada/calendário + 1 com MinIO real = 66 testes distintos aprovados, incluindo acesso anônimo negado, repetição, prazo fixo e limpeza após rollback. Build e typecheck do frontend aprovados. Logs: evidence-final-verify.log, evidence-s3-verify.log e evidence-build.log. Homologação visual autenticada permanece pendente.
+- Imagens prontas MinIO indisponíveis; construção local a partir de revisão fixa do repositório oficial adicionada ao Compose e validada. Serviço privado local disponível, com instruções de configuração no runbook. Não há coletor automático de objetos órfãos após queda abrupta; reconciliação operacional documentada.
+- **Próxima tarefa: MVP-064/065 — painel de conferência e validação manual**, com operador autorizado, consulta do comprovante, registro de valor/referência bancária e confirmação somente com entrada suficiente. Alteração para nome/sobrenome/telefone continua adiada conforme solicitado.
 
 ## Entrega em 29/09: base PIX manual e prévia de pagamento (MVP-060/061)
 
@@ -275,7 +397,7 @@ A primeira prioridade da lista anterior foi implementada: reenvio de verificaç�
 - Home escura/verde-água com a logomarca, slogan aprovado, FAQ e ilustração de agenda; login/cadastro/painel compartilham a identidade.
 - O usuário relatou em 23/09 ter testado login, sair e recuperação de senha com sucesso.
 
-## Última validação de implementação — 28/09/2026
+## Validação histórica de implementação — 28/09/2026 (entregas posteriores acima)
 
 | Check | Evidência |
 |---|---|
@@ -322,15 +444,15 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 
 - **MVP-040:** configuração de expediente, pausas, exceções e bloqueios concluída.
 - **MVP-041:** gerador e prévia privada concluídos e integrados com alocações persistidas.
-- **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs integrados ao Booking temporário; futuras transições de pagamento pendentes.
+- **MVP-042/043:** base de alocação interna e bloqueios transacionais concluída. **MVP-045 parcial:** locks com expediente/fuso e HOLDs integrados ao Booking temporário; confirmação, cancelamento e reagendamento coordenados; demais operações de atendimento seguem em MVP-067.
 - **MVP-044:** calendário visual mensal/semanal e lista diária implementado em 28/09; consulta por período e criação/liberação de bloqueios integradas.
 
 ## Próximas implementações
 
 1. **Concluído nesta entrega — publicação (MVP-034/035):** requisitos reais e publicação explícita implementados. CTA de reserva depende de Booking; PIX permanece privado.
 2. **Concluído — Compartilhamento (MVP-036):** aba com copiar link/mensagem, convite editável e abertura no WhatsApp, condicionada à publicação.
-3. **Próxima entrega — comprovantes (MVP-062/063):** upload privado, validação e estado EmConferencia; depois conferência manual MVP-064/065. Base MVP-060 e tela MVP-061 implementadas em modo prévia, sem liberação operacional de pagamento. Mecanismo MVP-054 implementado, números comerciais pendentes. Pedido adiado: trocar email por nome, sobrenome e telefone, com verificação e migração próprias.
-4. **Operação do profissional:** PIX manual, comprovantes, conferência, atendimento, reserva assistida (MVP-060 a 068), aba Financeiro (MVP-069), cadastro/edição/lista/histórico de Clientes (MVP-070, antecipado junto da reserva assistida).
+3. **Concluído — Clientes/reserva assistida (MVP-067/MVP-070) e agendamento por telefone/código:** validação descrita na entrega de 06/10. Números comerciais dos limites mensais ainda pendentes.
+4. **Financeiro MVP-069 concluído em 13/10. Recuperação/reemissão implementada em 22/10; próxima etapa: homologação integrada e privacidade/segurança.** Central interna MVP-068 implementada; mensagens externas e limites comerciais dos planos continuam pendentes de decisão/configuração.
 5. **Homologação:** E2E de navegador e MFA real, acessibilidade, SES, ingress confiável/limites por IP real, métricas/alertas, retenção de histórico, backup/restore e deploy.
 
 ### Onde entram as funções solicitadas pela responsável
@@ -339,9 +461,9 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 |---|---|
 | Acesso superadmin | Implementado e acesso com autenticador confirmado pela responsável |
 | Página com logomarca do profissional | Página, prévia e publicação explícita com requisitos reais implementadas |
-| Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; reservas temporárias integradas; confirmação/pagamento pendentes |
-| Aba de cadastrar clientes | MVP-070, junto da operação/reserva assistida MVP-067 |
-| Financeiro do profissional | MVP-060 a 069; depende de reservas e pagamentos reais. Separado do billing da plataforma |
+| Calendário e disponibilidade | Configuração, prévia, alocações e calendário MVP-040 a 044 concluídos; reservas, confirmação, cancelamento e reagendamento integrados |
+| Aba de cadastrar clientes | Implementada, com cadastro/edição/busca/histórico e reserva assistida (MVP-070/067) |
+| Financeiro do profissional | Aba consolidada Financeiro implementada (MVP-069), com movimentações, pendências e filtros, separada do billing da plataforma |
 | Compartilhar link e mensagem no WhatsApp | MVP-036 implementado; copiar link/mensagem e abrir WhatsApp, sem envio automático |
 
 ## Limitações e execução
@@ -349,8 +471,8 @@ Relatórios: `apps/api/target/surefire-reports`, `apps/api/target/failsafe-repor
 - O limite por conexão fica compartilhado quando a API está atrás do proxy Next. Antes de publicar, configurar ingress confiável; não aceitar X-Forwarded-For público como autoridade.
 - SMTP aceita a mensagem, mas não garante entrega na caixa final de um provedor externo. Uma interrupção entre envio e commit pode duplicar email; token continua de uso único.
 - V004 expira emails antigos ainda pendentes, que não tinham vínculo confiável ao token. Contas/perfis/trials são preservados; pedir novo link em `/verificar`.
-- Última verificação local em 29/09: migração V016 aplicada sobre V015 com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/entrar`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
-- Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, com reservas temporárias. Comprovantes, financeiro do profissional, aba Clientes, conferência PIX e deploy ainda não estão concluídos. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
+- Verificação local registrada em 06/10: migração V024 aplicada com dados existentes preservados; API na porta 8080 com health UP e frontend na porta 3000 com resposta HTTP 200 em `/entrar`. Docker/PostgreSQL/Mailpit e aplicações iniciados com os dados existentes preservados. Para iniciar novamente, usar `powershell -NoProfile -File infra/local/start-api.ps1` na raiz; não iniciar outra cópia se a porta 8080 estiver ocupada. Nenhum banco do usuário foi apagado; testes usam containers descartáveis.
+- Agenda da home é ilustrativa. Página, prévia e publicação funcional estão implementadas, com reservas temporárias. Comprovantes privados, conferência PIX, confirmação e cancelamento estão implementados. Aba Financeiro consolidada implementada em 13/10; deploy continua pendente. Aba Clientes implementada. Perfil/logo e serviços já estão disponíveis nas respectivas áreas do painel.
 - Cadastro de serviço por POST não é idempotente; após falha de rede, verificar a lista antes de repetir. Interface desabilita envio em andamento. Reservas temporárias já usam chave idempotente própria (MVP-053).
 - Variantes pequenas de logo ficam no banco nesta etapa (ADR-0006); revisar volume/backup antes de escalar. Imagens com orientação EXIF devem ser exportadas na orientação desejada. Não há publicação automática ao completar o perfil.
 - Recuperação de MFA é operacional/auditada; não há backup codes ou reset público. A chave DPAPI depende deste usuário Windows; produção exige gestão de segredos própria.

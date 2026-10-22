@@ -19,6 +19,212 @@ import org.testcontainers.junit.jupiter.*;
 @SpringBootTest(properties={"agendou.mail-worker-initial-delay=3600000","agendou.trial-worker-delay=3600000","agendou.booking-expiration-delay=3600000"})
 @AutoConfigureMockMvc @Testcontainers
 class PublicPageJourneyIT {
+ String reissueBody(int version)throws Exception{return json.writeValueAsString(Map.of("expectedVersion",version,"reason","Cliente verificado perdeu o codigo","identityVerified",true));}
+ @Test void reissuedCodeRevokesOldCodePortalReceiptAndPrivateFiles()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var bookingSession=phoneSession(a,start,"11999990000");UUID key=UUID.randomUUID();var booking=phoneReserve(a,bookingSession,key);String id=booking.get("id").asText(),oldCode=booking.get("accessCode").asText(),portal="/api/v1/public/"+a.slug+"/client",path="/api/v1/admin/bookings/"+id+"/access-code";
+  String quote=json.readTree(mvc.perform(get("/api/v1/public/"+a.slug+"/phone/review").cookie(bookingSession)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("quote").asText();
+  mvc.perform(get(path)).andExpect(status().isUnauthorized());
+  var access=Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",oldCode);
+  var oldSession=mvc.perform(post(portal+"/code").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(access))).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(jsonPath("$.version").value(0)).andExpect(jsonPath("$.accessCode").doesNotExist());
+  mvc.perform(post(path).with(user(a.id.toString())).contentType("application/json").content(reissueBody(0))).andExpect(status().isForbidden());
+  var b=account();mvc.perform(post(path).with(user(b.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(0))).andExpect(status().isNotFound());
+  String newCode=json.readTree(mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(0))).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andReturn().getResponse().getContentAsString()).get("accessCode").asText();
+  assertThat(newCode).hasSize(43);assertThat(CustomerContact.hash(newCode).equals(CustomerContact.hash(oldCode))).isFalse();
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(0))).andExpect(status().isConflict());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(1))).andExpect(status().isConflict());
+  mvc.perform(post(portal+"/code").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(access))).andExpect(status().isBadRequest());
+  for(String suffix:List.of("/bookings","/bookings/"+id,"/bookings/"+id+"/payment","/bookings/"+id+"/evidence/"+UUID.randomUUID()))mvc.perform(get(portal+suffix).cookie(oldSession)).andExpect(status().isNotFound());
+  mvc.perform(post(portal+"/bookings/"+id+"/evidence").cookie(oldSession).with(csrf()).contentType("application/octet-stream").content(new byte[]{1,2})).andExpect(status().isNotFound());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/phone/current").cookie(bookingSession)).andExpect(status().isNotFound());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/phone/bookings").cookie(bookingSession).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(json.writeValueAsBytes(Map.of("quote",quote,"accepted",true)))).andExpect(status().isNotFound());
+  var fresh=mvc.perform(post(portal+"/code").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",newCode)))).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(get(portal+"/bookings/"+id+"/payment").cookie(fresh)).andExpect(status().isOk());
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(jsonPath("$.version").value(1)).andExpect(jsonPath("$.history.length()").value(1)).andExpect(jsonPath("$.accessCode").doesNotExist());
+  assertThat(runtime.queryForObject("SELECT count(*) FROM booking_code_reissues",Long.class)).isZero();
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_code_reissues WHERE tenant_id=? AND recorded_by=?",Long.class,a.tenant,a.id)).isEqualTo(1);
+ }
+ @Test void codeReissueAuditFailureRollsBackAndRequiresConfirmationAndOperationalTenant()throws Exception{
+  var a=account();var session=phoneSession(a,publishAndFindStart(a),"11999990000");var booking=phoneReserve(a,session,UUID.randomUUID());UUID id=UUID.fromString(booking.get("id").asText());String path="/api/v1/admin/bookings/"+id+"/access-code";
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(json.writeValueAsString(Map.of("expectedVersion",0,"reason","Cliente perdeu o codigo","identityVerified",false)))).andExpect(status().isUnprocessableEntity());
+  owner().execute("ALTER TABLE booking_code_reissues ADD CONSTRAINT test_reissue_failure CHECK(false) NOT VALID");
+  try{mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(0))).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_code_reissues DROP CONSTRAINT test_reissue_failure");}
+  assertThat(owner().queryForObject("SELECT code_hash FROM booking_access_codes WHERE booking_id=?",String.class,id)).isEqualTo(CustomerContact.hash(booking.get("accessCode").asText()));
+  assertThat(owner().queryForObject("SELECT version FROM booking_access_codes WHERE booking_id=?",Integer.class,id)).isZero();
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(status().isOk());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(reissueBody(0))).andExpect(status().isForbidden());
+ }
+ @Test void concurrentCodeReissuesHaveOnlyOneWinner()throws Exception{
+  var a=account();var session=phoneSession(a,publishAndFindStart(a),"11999990000");String id=phoneReserve(a,session,UUID.randomUUID()).get("id").asText(),path="/api/v1/admin/bookings/"+id+"/access-code",body=reissueBody(0);
+  var gate=new java.util.concurrent.CountDownLatch(1);try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)){var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();for(int i=0;i<2;i++)tasks.add(executor.submit(()->{gate.await();return mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));gate.countDown();assertThat(List.of(tasks.get(0).get(),tasks.get(1).get())).containsExactlyInAnyOrder(200,409);}
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_code_reissues WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+ }
+
+ @Test void financeTotalsAreIndependentOfPaginationAndFlagLateReceipts()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var session=phoneSession(a,start,"11999990000");UUID id=UUID.fromString(phoneReserve(a,session,UUID.randomUUID()).get("id").asText());
+  owner().update("UPDATE public_profiles SET timezone='America/Sao_Paulo' WHERE tenant_id=?",a.tenant);
+  owner().update("INSERT INTO payment_transactions(id,tenant_id,intent_id,amount_cents,bank_reference,received_at,recorded_by,receiving_account,correlation_id) SELECT gen_random_uuid(),p.tenant_id,p.id,100,'fixture-'||g,?::timestamptz,?,'Conta teste','fixture' FROM payment_intents p CROSS JOIN generate_series(1,51) g WHERE p.tenant_id=? AND p.booking_id=?",start,a.id,a.tenant,id);
+  String day=java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString(),path="/api/v1/admin/finance";
+  var first=json.readTree(mvc.perform(get(path).param("from",day).param("to",day).with(user(a.id.toString()))).andExpect(jsonPath("$.summary.receivedCents").value(5100)).andExpect(jsonPath("$.items.length()").value(50)).andExpect(jsonPath("$.hasMore").value(true)).andReturn().getResponse().getContentAsString());
+  var last=json.readTree(mvc.perform(get(path).param("from",day).param("to",day).param("offset","50").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.receivedCents").value(5100)).andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.hasMore").value(false)).andReturn().getResponse().getContentAsString());
+  Set<String> ids=new HashSet<>();for(var page:List.of(first,last))for(var item:page.get("items"))assertThat(ids.add(item.get("id").asText())).isTrue();
+  for(String state:List.of("CONFIRMED","COMPLETED","NO_SHOW")){
+   owner().update("UPDATE bookings SET status=? WHERE id=?",state,id);
+   mvc.perform(get(path).param("from",day).param("to",day).param("view","BALANCES").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(4900)).andExpect(jsonPath("$.summary.depositDueCents").value(0));
+  }
+  owner().update("UPDATE bookings SET status='EXPIRED' WHERE id=?",id);
+  mvc.perform(get(path).param("from",day).param("to",day).param("view","BALANCES").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(0)).andExpect(jsonPath("$.summary.reviewCents").value(5100)).andExpect(jsonPath("$.items.length()").value(1));
+ }
+
+ @Test void financeSeparatesCashDatesFromCurrentCancellationBalances()throws Exception{
+  var a=account();var b=account();String start=publishAndFindStart(a);var session=phoneSession(a,start,"11999990000");UUID id=UUID.fromString(phoneReserve(a,session,UUID.randomUUID()).get("id").asText());
+  String payments="/api/v1/admin/payment-reviews/"+id;
+  mvc.perform(post(payments+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(2000,"finance-one"))).andExpect(status().isOk());
+  var receipt=json.readTree(mvc.perform(post(payments+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"finance-two"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+  String transaction=receipt.get("transactions").get(1).get("id").asText();
+  mvc.perform(post(payments+"/cancel").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(json.writeValueAsString(Map.of("reason","Cancelamento acordado com cliente","expectedNetCents",7000,"refundCents",5000,"policyReviewed",true)))).andExpect(status().isOk());
+  mvc.perform(post(payments+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,1000,"finance-refund-one"))).andExpect(status().isOk());
+  mvc.perform(post(payments+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,500,"finance-refund-two"))).andExpect(status().isOk());
+  owner().update("UPDATE public_profiles SET timezone='America/Sao_Paulo' WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE payment_transactions SET received_at='2026-10-01T03:00:00Z' WHERE tenant_id=?",a.tenant);
+  owner().update("UPDATE payment_refunds SET refunded_at='2026-10-02T03:00:00Z' WHERE tenant_id=?",a.tenant);
+  String path="/api/v1/admin/finance";
+  mvc.perform(get(path).param("from","2026-10-01").param("to","2026-10-02")).andExpect(status().isUnauthorized());
+  mvc.perform(get(path).param("from","2026-10-01").param("to","2026-10-02").with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.summary.receivedCents").value(7000)).andExpect(jsonPath("$.summary.refundedCents").value(1500)).andExpect(jsonPath("$.summary.netCents").value(5500)).andExpect(jsonPath("$.items.length()").value(4));
+  mvc.perform(get(path).param("from","2026-10-02").param("to","2026-10-02").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.receivedCents").value(0)).andExpect(jsonPath("$.summary.netCents").value(-1500));
+  mvc.perform(get(path).param("from","2026-09-30").param("to","2026-09-30").with(user(a.id.toString()))).andExpect(jsonPath("$.items.length()").value(0));
+  String day=java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString();
+  mvc.perform(get(path).param("from",day).param("to",day).param("view","BALANCES").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(0)).andExpect(jsonPath("$.summary.refundDueCents").value(3500)).andExpect(jsonPath("$.items[0].netCents").value(5500));
+  mvc.perform(get(path).param("from",day).param("to",day).with(user(b.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(0)).andExpect(jsonPath("$.items.length()").value(0));
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path).param("from",day).param("to",day).with(user(a.id.toString()))).andExpect(status().isOk());
+ }
+ @Test void financeExcludesExpiredForecastsAndValidatesRange()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var session=phoneSession(a,start,"11999990000");UUID id=UUID.fromString(phoneReserve(a,session,UUID.randomUUID()).get("id").asText());
+  String day=java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().toString(),path="/api/v1/admin/finance";
+  mvc.perform(get(path).param("from",day).param("to",day).param("view","BALANCES").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(10000)).andExpect(jsonPath("$.summary.depositDueCents").value(5000));
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",id);
+  mvc.perform(get(path).param("from",day).param("to",day).param("view","BALANCES").with(user(a.id.toString()))).andExpect(jsonPath("$.summary.totalDueCents").value(0)).andExpect(jsonPath("$.items.length()").value(0));
+  mvc.perform(get(path).param("from","2026-02-02").param("to","2026-02-01").with(user(a.id.toString()))).andExpect(status().isBadRequest());
+  mvc.perform(get(path).param("from","2025-01-01").param("to","2026-12-31").with(user(a.id.toString()))).andExpect(status().isBadRequest());
+  mvc.perform(get(path).param("from",day).param("to",day).param("offset","-1").with(user(a.id.toString()))).andExpect(status().isBadRequest());
+ }
+
+ @Test void notificationsArePrivateIdempotentAndPerAdministrator()throws Exception{
+  var a=account();var b=account();String start=publishAndFindStart(a);
+  var session=phoneSession(a,start,"11999990000");phoneReserve(a,session,UUID.randomUUID());String path="/api/v1/admin/notifications";
+  mvc.perform(get(path)).andExpect(status().isUnauthorized());
+  var feed=json.readTree(mvc.perform(get(path).with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.unreadCount").value(1)).andReturn().getResponse().getContentAsString());
+  String id=feed.get("items").get(0).get("id").asText();
+  mvc.perform(get(path).with(user(b.id.toString()))).andExpect(jsonPath("$.items.length()").value(0));
+  mvc.perform(get(path).param("before",id).with(user(b.id.toString()))).andExpect(status().isNotFound());
+  mvc.perform(post(path+"/"+id+"/read").with(user(b.id.toString())).with(csrf())).andExpect(status().isNotFound());
+  mvc.perform(post(path+"/"+id+"/read").with(user(a.id.toString()))).andExpect(status().isForbidden());
+  for(int i=0;i<2;i++)mvc.perform(post(path+"/"+id+"/read").with(user(a.id.toString())).with(csrf())).andExpect(status().isNoContent());
+  mvc.perform(get(path).param("unreadOnly","true").with(user(a.id.toString()))).andExpect(jsonPath("$.items.length()").value(0)).andExpect(jsonPath("$.unreadCount").value(0));
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(jsonPath("$.items[0].read").value(true));
+  assertThat(owner().queryForObject("SELECT count(*) FROM notification_reads WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+  assertThat(runtime.queryForObject("SELECT count(*) FROM notification_reads",Long.class)).isZero();
+  owner().update("UPDATE memberships SET tenant_id=? WHERE user_id=?",a.tenant,b.id);
+  mvc.perform(get(path).with(user(b.id.toString()))).andExpect(jsonPath("$.unreadCount").value(1));
+ }
+ @Test void notificationCursorKeepsSameTimestampEventsAndCoversLifecycle()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var session=phoneSession(a,start,"11999990000");
+  UUID booking=UUID.fromString(phoneReserve(a,session,UUID.randomUUID()).get("id").asText());
+  var kinds=List.of("REQUESTED","IN_REVIEW","CONFIRMED","RESCHEDULED","EXPIRED","CANCELED","COMPLETED","NO_SHOW","PAYMENT_RECORDED","REFUND_RECORDED");
+  for(int i=0;i<60;i++)owner().update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type,created_at) VALUES (?,?,?,?,now()-interval '1 day')",UUID.randomUUID(),a.tenant,booking,kinds.get(i%kinds.size()));
+  owner().update("INSERT INTO booking_events(id,tenant_id,booking_id,event_type) VALUES (?,?,?,'ASSISTED_REQUESTED')",UUID.randomUUID(),a.tenant,booking);
+  owner().update("UPDATE booking_events SET created_at='2026-01-01T00:00:00Z' WHERE tenant_id=?",a.tenant);
+  String path="/api/v1/admin/notifications";
+  var first=json.readTree(mvc.perform(get(path).with(user(a.id.toString()))).andExpect(jsonPath("$.items.length()").value(50)).andExpect(jsonPath("$.unreadCount").value(61)).andReturn().getResponse().getContentAsString());
+  var second=json.readTree(mvc.perform(get(path).param("before",first.get("nextCursor").asText()).with(user(a.id.toString()))).andExpect(jsonPath("$.items.length()").value(11)).andExpect(jsonPath("$.nextCursor").value("")).andReturn().getResponse().getContentAsString());
+  Set<String> ids=new HashSet<>(),types=new HashSet<>();for(var page:List.of(first,second))for(var item:page.get("items")){assertThat(ids.add(item.get("id").asText())).isTrue();types.add(item.get("type").asText());}assertThat(types).containsExactlyInAnyOrderElementsOf(kinds);
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(status().isOk());
+ }
+ jakarta.servlet.http.Cookie phoneSession(Account a,String start,String phone)throws Exception{
+  var result=mvc.perform(post("/api/v1/public/"+a.slug+"/phone/review").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("serviceId",serviceId(a),"start",start,"firstName","Maria","lastName","Silva","phone",phone)))).andExpect(status().isOk()).andReturn();return result.getResponse().getCookie("SESSION");
+ }
+ com.fasterxml.jackson.databind.JsonNode phoneReserve(Account a,jakarta.servlet.http.Cookie session,UUID key)throws Exception{
+  String quote=json.readTree(mvc.perform(get("/api/v1/public/"+a.slug+"/phone/review").cookie(session)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("quote").asText();
+  return json.readTree(mvc.perform(post("/api/v1/public/"+a.slug+"/phone/bookings").cookie(session).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(json.writeValueAsBytes(Map.of("quote",quote,"accepted",true)))).andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+ }
+ @Test void phoneBookingIsAnonymousIdempotentAndCodeScoped()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var first=phoneSession(a,start,"(11) 99999-0000");UUID key=UUID.randomUUID();var booking=phoneReserve(a,first,key);String code=booking.get("accessCode").asText(),id=booking.get("id").asText();assertThat(code).hasSize(43);assertThat(phoneReserve(a,first,key).get("id").asText()).isEqualTo(id);
+  var second=phoneSession(a,java.time.Instant.parse(start).plusSeconds(1800).toString(),"+55 11 99999-0000");String other=phoneReserve(a,second,UUID.randomUUID()).get("id").asText();
+  assertThat(owner().queryForObject("SELECT count(*) FROM customers WHERE tenant_id=? AND email IS NULL",Long.class,a.tenant)).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT count(*) FROM mail_outbox WHERE booking_id IN (SELECT id FROM bookings WHERE tenant_id=?)",Long.class,a.tenant)).isZero();assertThat(runtime.queryForObject("SELECT count(*) FROM booking_access_codes",Long.class)).isZero();
+  String path="/api/v1/public/"+a.slug+"/client";var access=json.writeValueAsBytes(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",code));
+  mvc.perform(post(path+"/code").contentType("application/json").content(access)).andExpect(status().isForbidden());
+  mvc.perform(get(path+"/bookings/"+id)).andExpect(status().isUnauthorized());
+  var b=account();mvc.perform(post("/api/v1/public/"+b.slug+"/client/code").with(csrf()).contentType("application/json").content(access)).andExpect(status().isBadRequest());
+  mvc.perform(post(path+"/code").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("firstName","Outra","lastName","Pessoa","phone","11999990000","code",code)))).andExpect(status().isBadRequest());
+  owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);
+  var session=mvc.perform(post(path+"/code").with(csrf()).contentType("application/json").content(access)).andExpect(status().isOk()).andReturn().getResponse().getCookie("SESSION");
+  mvc.perform(get(path+"/bookings").cookie(session)).andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].id").value(id));
+  mvc.perform(get(path+"/bookings/"+other).cookie(session)).andExpect(status().isNotFound());mvc.perform(get(path+"/bookings/"+other+"/payment").cookie(session)).andExpect(status().isNotFound());
+  mvc.perform(get(path+"/bookings/"+id+"/payment").cookie(session)).andExpect(status().isOk());
+  mvc.perform(post(path+"/logout").cookie(first).with(csrf())).andExpect(status().isNoContent());mvc.perform(get("/api/v1/public/"+a.slug+"/phone/current").cookie(first)).andExpect(status().isNotFound());
+ }
+ @Test void phoneBookingRollsBackAndRequiresPublishedPage()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var session=phoneSession(a,start,"11988887777");
+  owner().execute("ALTER TABLE booking_access_codes ADD CONSTRAINT test_code_failure CHECK(false) NOT VALID");
+  try{String quote=json.readTree(mvc.perform(get("/api/v1/public/"+a.slug+"/phone/review").cookie(session)).andReturn().getResponse().getContentAsString()).get("quote").asText();mvc.perform(post("/api/v1/public/"+a.slug+"/phone/bookings").cookie(session).with(csrf()).header("Idempotency-Key",UUID.randomUUID()).contentType("application/json").content(json.writeValueAsBytes(Map.of("quote",quote,"accepted",true)))).andExpect(status().isConflict());
+   for(String table:List.of("customers","bookings","calendar_allocations","payment_intents","booking_usage","booking_requests"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+  }finally{owner().execute("ALTER TABLE booking_access_codes DROP CONSTRAINT test_code_failure");}
+  owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);mvc.perform(get("/api/v1/public/"+a.slug+"/phone/review").cookie(session)).andExpect(status().isNotFound());
+ }
+ @Test void assistedPhoneCustomerReceivesPrivateCode()throws Exception{
+  var a=account();String start=publishAndFindStart(a);UUID customer=UUID.fromString(json.readTree(mvc.perform(post("/api/v1/admin/customers").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(customerBody("Maria Silva","",0))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("id").asText());
+  String body=assistedBody(a,start,assistedQuote(a,customer),UUID.randomUUID());String path="/api/v1/admin/customers/"+customer+"/bookings";
+  var created=mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andReturn();var session=created.getResponse().getCookie("SESSION");var result=json.readTree(created.getResponse().getContentAsString());String code=result.get("accessCode").asText();
+  mvc.perform(post(path).cookie(session).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(jsonPath("$.accessCode").value(code));
+  mvc.perform(get("/api/v1/admin/customers").with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].email").value(""));
+  mvc.perform(post("/api/v1/public/"+a.slug+"/client/code").with(csrf()).contentType("application/json").content(json.writeValueAsBytes(Map.of("firstName","Maria","lastName","Silva","phone","11999990000","code",code)))).andExpect(status().isOk());
+ }
+ String customerBody(String name,String email,int version)throws Exception{return json.writeValueAsString(Map.of("name",name,"email",email,"phone","11999990000","version",version));}
+ UUID manualCustomer(Account a)throws Exception{return UUID.fromString(json.readTree(mvc.perform(post("/api/v1/admin/customers").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(customerBody("Cliente manual",UUID.randomUUID()+"@example.test",0))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("id").asText());}
+ String assistedQuote(Account a,UUID customer)throws Exception{return json.readTree(mvc.perform(get("/api/v1/admin/customers/"+customer+"/booking-quote").param("serviceId",serviceId(a).toString()).with(user(a.id.toString()))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("quote").asText();}
+ String assistedBody(Account a,String start,String quote,UUID key)throws Exception{return json.writeValueAsString(Map.of("serviceId",serviceId(a),"start",start,"quote",quote,"requestKey",key,"confirmed",true));}
+ @Test void customerDirectoryDeduplicatesVersionsAndIsolatesTenants()throws Exception{
+  var a=account();var b=account();String path="/api/v1/admin/customers",email=UUID.randomUUID()+"@example.test";String body=customerBody("Cliente teste",email.toUpperCase(Locale.ROOT),0);
+  mvc.perform(post(path).with(user(a.id.toString())).contentType("application/json").content(body)).andExpect(status().isForbidden());
+  UUID id=UUID.fromString(json.readTree(mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("id").asText());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(customerBody("Outro nome",email,0))).andExpect(jsonPath("$.id").value(id.toString())).andExpect(jsonPath("$.name").value("Cliente teste"));
+  mvc.perform(get(path+"/"+id).with(user(b.id.toString()))).andExpect(status().isNotFound());
+  mvc.perform(put(path+"/"+id).with(user(b.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isNotFound());
+  mvc.perform(put(path+"/"+id).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(customerBody("Nome atualizado",email,0))).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
+  mvc.perform(put(path+"/"+id).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+  mvc.perform(get(path).param("search","1199999").with(user(a.id.toString()))).andExpect(jsonPath("$.items.length()").value(1));
+  assertThat(owner().queryForObject("SELECT count(*) FROM customer_changes WHERE customer_id=?",Long.class,id)).isEqualTo(2);assertThat(runtime.queryForObject("SELECT count(*) FROM customer_changes",Long.class)).isZero();
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path+"/"+id).with(user(a.id.toString()))).andExpect(status().isOk());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isForbidden());
+ }
+ @Test void assistedBookingWorksPrivatelyAndPreservesIdentityAndIdempotency()throws Exception{
+  var a=account();String start=publishAndFindStart(a);owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);UUID customer=manualCustomer(a);String quote=assistedQuote(a,customer),path="/api/v1/admin/customers/"+customer+"/bookings",body=assistedBody(a,start,quote,UUID.randomUUID());
+  mvc.perform(post(path).with(user(a.id.toString())).contentType("application/json").content(body)).andExpect(status().isForbidden());
+  var b=account();mvc.perform(post(path).with(user(b.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isNotFound());
+  String first=mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT")).andReturn().getResponse().getContentAsString();
+  UUID booking=UUID.fromString(json.readTree(first).get("id").asText());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(jsonPath("$.id").value(booking.toString()));
+  for(String table:List.of("bookings","customers","calendar_allocations","payment_intents","assisted_bookings","booking_usage"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(1);
+  assertThat(owner().queryForObject("SELECT count(*) FROM mail_outbox WHERE booking_id=?",Long.class,booking)).isZero();assertThat(runtime.queryForObject("SELECT count(*) FROM assisted_bookings",Long.class)).isZero();
+  mvc.perform(get("/api/v1/admin/customers/"+customer).with(user(a.id.toString()))).andExpect(jsonPath("$.customer.emailLocked").value(true)).andExpect(jsonPath("$.bookings[0].id").value(booking.toString()));
+  mvc.perform(put("/api/v1/admin/customers/"+customer).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(customerBody("Cliente manual","changed@example.test",0))).andExpect(status().isConflict());
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(assistedBody(a,start,quote,UUID.randomUUID()))).andExpect(status().isConflict());
+ }
+ @Test void assistedBookingRejectsStaleQuotesAndRollsBackAuditFailure()throws Exception{
+  var a=account();String start=publishAndFindStart(a);UUID customer=manualCustomer(a);String quote=assistedQuote(a,customer),path="/api/v1/admin/customers/"+customer+"/bookings";
+  owner().update("UPDATE services SET price_cents=12000 WHERE tenant_id=?",a.tenant);
+  mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(assistedBody(a,start,quote,UUID.randomUUID()))).andExpect(status().isConflict());
+  String body=assistedBody(a,start,assistedQuote(a,customer),UUID.randomUUID());
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_reject_assisted CHECK(event_type<>'ASSISTED_REQUESTED') NOT VALID");
+  try{mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+   for(String table:List.of("bookings","calendar_allocations","payment_intents","assisted_bookings","booking_usage","booking_requests"))assertThat(owner().queryForObject("SELECT count(*) FROM "+table+" WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+  }finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_reject_assisted");}
+ }
  @Container static PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:17").withUsername("agendou_app").withPassword("agendou_app");
  @DynamicPropertySource static void database(DynamicPropertyRegistry p){p.add("spring.datasource.url",postgres::getJdbcUrl);p.add("spring.flyway.url",postgres::getJdbcUrl);}
  @Autowired MockMvc mvc;@Autowired AuthService auth;@Autowired JdbcTemplate runtime;
@@ -26,6 +232,188 @@ class PublicPageJourneyIT {
  @org.springframework.boot.test.mock.mockito.MockBean org.springframework.mail.javamail.JavaMailSender sender;
  @Autowired br.com.agendou.identity.MailDeliveryService delivery;
  @Autowired BookingService bookings;
+ // Each scenario has its own synthetic users; do not share peer-rate history across tests.
+ @org.junit.jupiter.api.BeforeEach void resetRateCounters(){owner().update("DELETE FROM auth_rate_limits");}
+ @org.springframework.boot.test.mock.mockito.MockBean EvidenceStorage evidenceStorage;
+ void moveAppointmentToPast(UUID id){owner().update("UPDATE bookings SET starts_at=starts_at-interval '3 days',ends_at=ends_at-interval '3 days' WHERE id=?",id);owner().update("UPDATE calendar_allocations SET starts_at=starts_at-interval '3 days',ends_at=ends_at-interval '3 days',protected_start=protected_start-interval '3 days',protected_end=protected_end-interval '3 days' WHERE id=(SELECT allocation_id FROM bookings WHERE id=?)",id);}
+ String outcomeBody(String status,int version)throws Exception{return json.writeValueAsString(Map.of("status",status,"expectedVersion",version,"reason","Resultado conferido pelo profissional","confirmed",true));}
+ @Test void outcomesRequireConfirmedElapsedAppointmentAndPreserveMoney()throws Exception{
+  for(String outcome:List.of("COMPLETED","NO_SHOW")){
+   var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/bookings/"+id+"/outcome";String body=outcomeBody(outcome,0);
+   mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+   mvc.perform(post("/api/v1/admin/payment-reviews/"+id+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"outcome-receipt"))).andExpect(status().isOk());
+   mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());moveAppointmentToPast(id);
+   mvc.perform(post(path).with(user(a.id.toString())).contentType("application/json").content(body)).andExpect(status().isForbidden());var b=account();mvc.perform(post(path).with(user(b.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isNotFound());
+   mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(outcomeBody(outcome,1))).andExpect(status().isConflict());
+   for(int i=0;i<2;i++)mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value(outcome));
+   assertThat(owner().queryForObject("SELECT count(*) FROM booking_outcomes WHERE booking_id=?",Long.class,id)).isEqualTo(1);assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,id)).isEqualTo("COMMITTED");assertThat(owner().queryForObject("SELECT status FROM payment_intents WHERE booking_id=?",String.class,id)).isEqualTo("CONFIRMED");
+   mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id+"/payment").cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value(outcome)).andExpect(jsonPath("$.receivedCents").value(5000)).andExpect(jsonPath("$.pixKey").doesNotExist());
+   mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id).cookie(c.cookie)).andExpect(jsonPath("$.outcome.status").value(outcome));
+   assertThat(runtime.queryForObject("SELECT count(*) FROM booking_outcomes",Long.class)).isZero();
+  }
+ }
+ @Test void concurrentOutcomesDoNotOverwriteEachOther()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());mvc.perform(post("/api/v1/admin/payment-reviews/"+id+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"outcome-race"))).andExpect(status().isOk());moveAppointmentToPast(id);
+  var gate=new java.util.concurrent.CountDownLatch(1);try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)){var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();for(String status:List.of("COMPLETED","NO_SHOW")){String body=outcomeBody(status,0);tasks.add(executor.submit(()->{gate.await();return mvc.perform(post("/api/v1/admin/bookings/"+id+"/outcome").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));}gate.countDown();assertThat(List.of(tasks.get(0).get(),tasks.get(1).get())).containsExactlyInAnyOrder(200,409);}
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_events WHERE booking_id=? AND event_type IN ('COMPLETED','NO_SHOW')",Long.class,id)).isEqualTo(1);
+ }
+ @Test void outcomeAuditFailureRollsBackAndBlockedTenantCannotClose()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());mvc.perform(post("/api/v1/admin/payment-reviews/"+id+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"outcome-rollback"))).andExpect(status().isOk());moveAppointmentToPast(id);String path="/api/v1/admin/bookings/"+id+"/outcome",body=outcomeBody("COMPLETED",0);
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_outcome_rollback CHECK(event_type<>'COMPLETED') NOT VALID");try{mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_outcome_rollback");}
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE id=?",String.class,id)).isEqualTo("CONFIRMED");assertThat(owner().queryForObject("SELECT count(*) FROM booking_outcomes WHERE booking_id=?",Long.class,id)).isZero();
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isForbidden());
+ }
+ @Test void rescheduleCoordinatesConcurrentChangesAndMonthlyQuota()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var c=client(a,start);UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/bookings/"+id;
+  var gate=new java.util.concurrent.CountDownLatch(1);try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)){var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();for(int minutes:List.of(15,30)){String body=json.writeValueAsString(Map.of("requestKey",UUID.randomUUID(),"expectedVersion",0,"start",java.time.Instant.parse(start).plusSeconds(minutes*60),"reason","Alteração concorrente de teste"));tasks.add(executor.submit(()->{gate.await();return mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));}gate.countDown();assertThat(List.of(tasks.get(0).get(),tasks.get(1).get())).containsExactlyInAnyOrder(200,409);}
+  var nextMonth=java.time.Instant.parse(start).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toLocalDate().withDayOfMonth(1).plusMonths(1);String target=nextMonth.atTime(9,0).atZone(java.time.ZoneId.of("America/Sao_Paulo")).toInstant().toString();
+  owner().update("UPDATE availability_settings SET schedule=?::jsonb WHERE tenant_id=?",json.writeValueAsString(Map.of("weekly",List.of(),"exceptions",List.of(Map.of("date",nextMonth.toString(),"reason","Teste","periods",List.of(Map.of("start","09:00","end","10:00")))))),a.tenant);
+  owner().update("UPDATE services SET duration_minutes=60,price_cents=20000 WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path+"/reschedule-options").with(user(a.id.toString())).param("date",nextMonth.toString())).andExpect(status().isOk()).andExpect(jsonPath("$.slots.length()").value(3));
+  String body=json.writeValueAsString(Map.of("requestKey",UUID.randomUUID(),"expectedVersion",1,"start",target,"reason","Alteração para o próximo mês"));
+  owner().update("UPDATE plans SET monthly_booking_limit=0 WHERE code='PREMIUM_TOP'");try{mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());}finally{owner().update("UPDATE plans SET monthly_booking_limit=NULL WHERE code='PREMIUM_TOP'");}
+  mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+  assertThat(owner().queryForObject("SELECT month FROM booking_usage WHERE booking_id=?",java.sql.Date.class,id).toLocalDate()).isEqualTo(nextMonth);assertThat(owner().queryForObject("SELECT price_cents FROM bookings WHERE id=?",Long.class,id)).isEqualTo(10000);
+ }
+ @Test void reschedulePreservesPaymentAndDeadlineAndRejectsStaleChanges()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var c=client(a,start);UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/bookings/"+id;
+  var original=owner().queryForMap("SELECT expires_at,price_cents,pix_snapshot::text AS pix FROM bookings WHERE id=?",id);String next=java.time.Instant.parse(start).plusSeconds(1800).toString();String body=json.writeValueAsString(Map.of("requestKey",UUID.randomUUID(),"expectedVersion",0,"start",next,"reason","Cliente solicitou outro horário"));
+  mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).contentType("application/json").content(body)).andExpect(status().isForbidden());var b=account();mvc.perform(post(path+"/reschedule").with(user(b.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isNotFound());
+  for(int i=0;i<2;i++)mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1)).andExpect(jsonPath("$.start").value(next));
+  assertThat(owner().queryForMap("SELECT expires_at,price_cents,pix_snapshot::text AS pix FROM bookings WHERE id=?",id)).isEqualTo(original);assertThat(owner().queryForObject("SELECT count(*) FROM booking_reschedules WHERE booking_id=?",Long.class,id)).isEqualTo(1);
+  String stale=json.writeValueAsString(Map.of("requestKey",UUID.randomUUID(),"expectedVersion",0,"start",start,"reason","Outro reagendamento solicitado"));mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(stale)).andExpect(status().isConflict());
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id).cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.reschedules.length()").value(1));
+  reserve(a,client(a,start),UUID.randomUUID()).andExpect(status().isCreated());assertThat(runtime.queryForObject("SELECT count(*) FROM booking_reschedules",Long.class)).isZero();
+ }
+ @Test void rescheduleConflictAndAuditFailureKeepOriginalSlot()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var c=client(a,start);UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String next=java.time.Instant.parse(start).plusSeconds(1800).toString();var other=client(a,next);reserve(a,other,UUID.randomUUID()).andExpect(status().isCreated());String path="/api/v1/admin/bookings/"+id;String body=json.writeValueAsString(Map.of("requestKey",UUID.randomUUID(),"expectedVersion",0,"start",next,"reason","Troca solicitada pelo cliente"));
+  mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE tenant_id=? AND id<>?",a.tenant,id);
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_reschedule_rollback CHECK(event_type<>'RESCHEDULED') NOT VALID");try{mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_reschedule_rollback");}
+  assertThat(owner().queryForObject("SELECT starts_at FROM bookings WHERE id=?",java.sql.Timestamp.class,id).toInstant()).isEqualTo(java.time.Instant.parse(start));assertThat(owner().queryForObject("SELECT count(*) FROM booking_reschedules WHERE booking_id=?",Long.class,id)).isZero();
+  mvc.perform(post("/api/v1/admin/payment-reviews/"+id+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"reschedule-paid"))).andExpect(status().isOk());
+  mvc.perform(post(path+"/reschedule").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED"));assertThat(owner().queryForObject("SELECT amount_cents FROM payment_transactions WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(5000);
+ }
+ @Test void cancellationReleasesSlotPreservesAuditAndAllowsOnlyPlannedRefund()throws Exception{
+  var a=account();String start=publishAndFindStart(a);var c=client(a,start);UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id;
+  var credit=mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"cancel-credit"))).andExpect(status().isOk()).andReturn();String transaction=json.readTree(credit.getResponse().getContentAsString()).get("transactions").get(0).get("id").asText();
+  String body=json.writeValueAsString(Map.of("reason","Cliente solicitou cancelamento","expectedNetCents",5000,"refundCents",4000,"policyReviewed",true));
+  mvc.perform(post(path+"/cancel").with(user(a.id.toString())).contentType("application/json").content(body)).andExpect(status().isForbidden());var b=account();mvc.perform(post(path+"/cancel").with(user(b.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isNotFound());
+  for(int i=0;i<2;i++)mvc.perform(post(path+"/cancel").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED")).andExpect(jsonPath("$.refundDueCents").value(4000)).andExpect(jsonPath("$.cancellation.retainedCents").value(1000));
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_events WHERE booking_id=? AND event_type='CANCELED'",Long.class,id)).isEqualTo(1);assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,id)).isEqualTo("COMMITTED");
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,5000,"over-cancel"))).andExpect(status().isConflict());
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,4000,"cancel-refund"))).andExpect(status().isOk()).andExpect(jsonPath("$.financialStatus").value("CANCELED_SETTLED"));
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 day' WHERE id=?",id);bookings.expireTenant(a.tenant);
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id+"/payment").cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED")).andExpect(jsonPath("$.pixKey").doesNotExist()).andExpect(jsonPath("$.cancellation.reason").value("Cliente solicitou cancelamento"));
+  reserve(a,client(a,start),UUID.randomUUID()).andExpect(status().isCreated());
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(1000,"credit-after-cancel"))).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED")).andExpect(jsonPath("$.refundDueCents").value(1000));
+  assertThat(runtime.queryForObject("SELECT count(*) FROM booking_cancellations",Long.class)).isZero();
+ }
+ @Test void cancellationRejectsStaleDecisionAndRollsBackAllChanges()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id;
+  String body=json.writeValueAsString(Map.of("reason","Cancelamento solicitado pelo cliente","expectedNetCents",0,"refundCents",0,"policyReviewed",true));
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_cancel_rollback CHECK(event_type<>'CANCELED') NOT VALID");try{mvc.perform(post(path+"/cancel").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_cancel_rollback");}
+  assertThat(owner().queryForObject("SELECT count(*) FROM booking_cancellations WHERE booking_id=?",Long.class,id)).isZero();assertThat(owner().queryForObject("SELECT active FROM calendar_allocations WHERE id=(SELECT allocation_id FROM bookings WHERE id=?)",Boolean.class,id)).isTrue();
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(1000,"stale-cancel"))).andExpect(status().isOk());
+  mvc.perform(post(path+"/cancel").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+  body=json.writeValueAsString(Map.of("reason","Cancelamento solicitado pelo cliente","expectedNetCents",1000,"refundCents",1000,"policyReviewed",true));
+  mvc.perform(post(path+"/cancel").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk());assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,id)).isEqualTo("RELEASED");
+ }
+ @Test void cancellationRejectsExpiredAndBlockedReservations()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id+"/cancel";String body=json.writeValueAsString(Map.of("reason","Cancelar reserva de teste","expectedNetCents",0,"refundCents",0,"policyReviewed",true));
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",id);mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);mvc.perform(post(path).with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isForbidden());
+ }
+ @Test void manualReceiptConfirmsOnlyWithEnoughFundsAndIsIdempotent()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));var made=reserve(a,c,UUID.randomUUID()).andReturn();UUID id=UUID.fromString(json.readTree(made.getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id;
+  mvc.perform(get(path)).andExpect(status().isUnauthorized());var b=account();mvc.perform(get(path).with(user(b.id.toString()))).andExpect(status().isNotFound());
+  String time=java.time.Instant.now().toString();String partial=json.writeValueAsString(Map.of("amountCents",2000,"bankReference"," bank-1 ","receivingAccount","Conta teste","receivedAt",time,"verified",true));
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).contentType("application/json").content(partial)).andExpect(status().isForbidden());
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(partial)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT")).andExpect(jsonPath("$.receivedCents").value(2000));
+  String rest=json.writeValueAsString(Map.of("amountCents",3000,"bankReference","bank-2","receivingAccount","Conta teste","receivedAt",java.time.Instant.now().toString(),"verified",true));
+  for(int i=0;i<2;i++)mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(rest)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED")).andExpect(jsonPath("$.receivedCents").value(5000));
+  assertThat(owner().queryForObject("SELECT count(*) FROM payment_transactions WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(2);
+  assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,id)).isEqualTo("COMMITTED");
+  assertThat(owner().queryForObject("SELECT kind FROM calendar_allocations WHERE id=(SELECT allocation_id FROM bookings WHERE id=?)",String.class,id)).isEqualTo("BOOKING");
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 day' WHERE id=?",id);bookings.expireTenant(a.tenant);
+  mvc.perform(get("/api/v1/public/"+a.slug+"/client/bookings/"+id+"/payment").cookie(c.cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED")).andExpect(jsonPath("$.receivedCents").value(5000)).andExpect(jsonPath("$.pixKey").doesNotExist());
+  mvc.perform(post("/api/v1/public/"+a.slug+"/client/bookings/"+id+"/evidence").cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(3))).andExpect(status().isConflict());
+  assertThat(runtime.queryForObject("SELECT count(*) FROM payment_transactions",Long.class)).isZero();
+ }
+ @Test void excessRefundAndLatePaymentDoNotReopenExpiredBooking()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id;
+  String input=receiptBody(12000," bank-excess ");var b=account();mvc.perform(post(path+"/receipts").with(user(b.id.toString())).with(csrf()).contentType("application/json").content(input)).andExpect(status().isNotFound());
+  var made=mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(input)).andExpect(status().isOk()).andExpect(jsonPath("$.financialStatus").value("EXCESS")).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT")).andReturn();String transaction=json.readTree(made.getResponse().getContentAsString()).get("transactions").get(0).get("id").asText();
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(1000,"BANK-EXCESS"))).andExpect(status().isConflict());
+  String refund=refundBody(transaction,2000,"refund-excess");
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).contentType("application/json").content(refund)).andExpect(status().isForbidden());mvc.perform(post(path+"/refunds").with(user(b.id.toString())).with(csrf()).contentType("application/json").content(refund)).andExpect(status().isNotFound());
+  for(int i=0;i<2;i++)mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refund)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED")).andExpect(jsonPath("$.receivedCents").value(10000));
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,10001,"refund-over"))).andExpect(status().isConflict());
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,6000,"refund-deposit"))).andExpect(status().isConflict());
+  var other=client(a,owner().queryForObject("SELECT starts_at FROM bookings WHERE id=?",java.sql.Timestamp.class,id).toInstant().plusSeconds(1800).toString());UUID late=UUID.fromString(json.readTree(reserve(a,other,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String latePath="/api/v1/admin/payment-reviews/"+late;
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",late);
+  var result=mvc.perform(post(latePath+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"late-ref"))).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("EXPIRED")).andExpect(jsonPath("$.financialStatus").value("LATE")).andReturn();String lateTx=json.readTree(result.getResponse().getContentAsString()).get("transactions").get(0).get("id").asText();
+  mvc.perform(post(latePath+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(lateTx,5000,"late-refund"))).andExpect(status().isOk()).andExpect(jsonPath("$.financialStatus").value("REFUNDED")).andExpect(jsonPath("$.status").value("EXPIRED"));
+  assertThat(owner().queryForObject("SELECT active FROM calendar_allocations WHERE id=(SELECT allocation_id FROM bookings WHERE id=?)",Boolean.class,late)).isFalse();assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,late)).isEqualTo("RELEASED");
+ }
+ String receiptBody(long cents,String reference)throws Exception{return json.writeValueAsString(Map.of("amountCents",cents,"bankReference",reference,"receivingAccount","Conta teste","receivedAt",java.time.Instant.now().toString(),"verified",true));}
+ String refundBody(String transaction,long cents,String reference)throws Exception{return json.writeValueAsString(Map.of("transactionId",transaction,"amountCents",cents,"bankReference",reference,"reason","Devolução conferida no banco","refundedAt",java.time.Instant.now().toString(),"verified",true));}
+ @Test void concurrentRefundsCannotExceedReceiptAndBlockedTenantCannotWrite()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());String path="/api/v1/admin/payment-reviews/"+id;
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",id);
+  var result=mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(receiptBody(5000,"concurrent"))).andExpect(status().isOk()).andReturn();String transaction=json.readTree(result.getResponse().getContentAsString()).get("transactions").get(0).get("id").asText();
+  var gate=new java.util.concurrent.CountDownLatch(1);try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)){
+   var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();for(int i=0;i<2;i++){String body=refundBody(transaction,4000,"parallel-"+i);tasks.add(executor.submit(()->{gate.await();return mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));}gate.countDown();assertThat(List.of(tasks.get(0).get(),tasks.get(1).get())).containsExactlyInAnyOrder(200,409);
+  }
+  assertThat(owner().queryForObject("SELECT sum(amount_cents) FROM payment_refunds WHERE tenant_id=?",Long.class,a.tenant)).isEqualTo(4000);
+  owner().update("UPDATE subscriptions SET trial_started_at=now()-interval '8 days',trial_ends_at=now()-interval '1 day' WHERE tenant_id=?",a.tenant);
+  mvc.perform(get(path).with(user(a.id.toString()))).andExpect(status().isOk());
+  mvc.perform(post(path+"/refunds").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(refundBody(transaction,1000,"blocked"))).andExpect(status().isForbidden());
+ }
+ @Test void reviewDownloadIsPrivateAndConfirmationRollsBackTogether()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));UUID id=UUID.fromString(json.readTree(reserve(a,c,UUID.randomUUID()).andReturn().getResponse().getContentAsString()).get("id").asText());
+  var upload=mvc.perform(post("/api/v1/public/"+a.slug+"/client/bookings/"+id+"/evidence").cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(1))).andExpect(status().isCreated()).andReturn();String evidence=json.readTree(upload.getResponse().getContentAsString()).get("id").asText();
+  org.mockito.Mockito.when(evidenceStorage.get(org.mockito.ArgumentMatchers.anyString())).thenReturn(EvidenceValidatorTest.png(1));String path="/api/v1/admin/payment-reviews/"+id;
+  mvc.perform(get(path+"/evidence/"+evidence).with(user(a.id.toString()))).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"));var b=account();mvc.perform(get(path+"/evidence/"+evidence).with(user(b.id.toString()))).andExpect(status().isNotFound());
+  String body=json.writeValueAsString(Map.of("amountCents",5000,"bankReference","rollback-ref","receivingAccount","Conta teste","receivedAt",java.time.Instant.now().toString(),"verified",true));
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_confirmation_rollback CHECK(event_type<>'CONFIRMED') NOT VALID");try{mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_confirmation_rollback");}
+  assertThat(owner().queryForObject("SELECT count(*) FROM payment_transactions WHERE tenant_id=?",Long.class,a.tenant)).isZero();assertThat(owner().queryForObject("SELECT status FROM bookings WHERE id=?",String.class,id)).isEqualTo("IN_REVIEW");assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,id)).isEqualTo("HELD");
+  mvc.perform(post(path+"/receipts").with(user(a.id.toString())).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CONFIRMED"));
+ }
+ @Test void evidenceIsPrivateIdempotentAndReviewHasFixedDeadline()throws Exception{
+  var a=account();var start=publishAndFindStart(a);var c=client(a,start);var made=reserve(a,c,UUID.randomUUID()).andReturn();UUID booking=UUID.fromString(json.readTree(made.getResponse().getContentAsString()).get("id").asText());String path="/api/v1/public/"+a.slug+"/client/bookings/"+booking+"/evidence";
+  byte[] file=EvidenceValidatorTest.png(1);var stored=new java.util.concurrent.ConcurrentHashMap<String,byte[]>();
+  org.mockito.Mockito.doAnswer(call->{stored.put(call.getArgument(0),call.getArgument(1));return null;}).when(evidenceStorage).put(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString());
+  org.mockito.Mockito.when(evidenceStorage.get(org.mockito.ArgumentMatchers.anyString())).thenAnswer(call->stored.get(call.getArgument(0)));
+  mvc.perform(post(path).cookie(c.cookie).contentType("application/octet-stream").content(file)).andExpect(status().isForbidden());
+  var result=mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(file)).andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("IN_REVIEW")).andReturn();var first=json.readTree(result.getResponse().getContentAsString());
+  mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(file)).andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(first.get("id").asText()));
+  mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(2))).andExpect(status().isCreated()).andExpect(jsonPath("$.expiresAt").value(first.get("expiresAt").asText()));
+  assertThat(stored).hasSize(2);assertThat(owner().queryForObject("SELECT state FROM booking_usage WHERE booking_id=?",String.class,booking)).isEqualTo("HELD");
+  mvc.perform(get(path+"/"+first.get("id").asText()).cookie(c.cookie)).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(header().string("X-Content-Type-Options","nosniff"));
+  var other=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());reserve(a,other,UUID.randomUUID()).andExpect(status().isCreated());
+  mvc.perform(get(path+"/"+first.get("id").asText()).cookie(other.cookie)).andExpect(status().isNotFound());
+  mvc.perform(post(path).cookie(other.cookie).with(csrf()).contentType("application/octet-stream").content(file)).andExpect(status().isNotFound());
+  owner().update("UPDATE bookings SET expires_at=now()-interval '1 minute' WHERE id=?",booking);bookings.expireTenant(a.tenant);
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE id=?",String.class,booking)).isEqualTo("IN_REVIEW");
+  owner().update("UPDATE bookings SET review_expires_at=now()-interval '1 minute' WHERE id=?",booking);bookings.expireTenant(a.tenant);
+  assertThat(owner().queryForObject("SELECT status FROM payment_intents WHERE booking_id=?",String.class,booking)).isEqualTo("EXPIRED");
+  mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(3))).andExpect(status().isConflict());
+ }
+ @Test void failedEvidencePersistenceRemovesObjectAndRollsBackReview()throws Exception{
+  var a=account();var c=client(a,publishAndFindStart(a));var made=reserve(a,c,UUID.randomUUID()).andReturn();String booking=json.readTree(made.getResponse().getContentAsString()).get("id").asText();String path="/api/v1/public/"+a.slug+"/client/bookings/"+booking+"/evidence";
+  mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content("not an image".getBytes())).andExpect(status().isUnprocessableEntity());
+  org.mockito.Mockito.verifyNoInteractions(evidenceStorage);
+  org.mockito.Mockito.doThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Armazenamento indisponível.")).when(evidenceStorage).put(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString());
+  mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(1))).andExpect(status().isServiceUnavailable());
+  assertThat(owner().queryForObject("SELECT count(*) FROM payment_evidence WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+  org.mockito.Mockito.reset(evidenceStorage);
+  owner().execute("ALTER TABLE booking_events ADD CONSTRAINT test_reject_review CHECK(event_type<>'IN_REVIEW') NOT VALID");
+  try{mvc.perform(post(path).cookie(c.cookie).with(csrf()).contentType("application/octet-stream").content(EvidenceValidatorTest.png(1))).andExpect(status().isConflict());}finally{owner().execute("ALTER TABLE booking_events DROP CONSTRAINT test_reject_review");}
+  org.mockito.Mockito.verify(evidenceStorage).remove(org.mockito.ArgumentMatchers.anyString());
+  assertThat(owner().queryForObject("SELECT count(*) FROM payment_evidence WHERE tenant_id=?",Long.class,a.tenant)).isZero();
+  assertThat(owner().queryForObject("SELECT status FROM bookings WHERE id=?",String.class,UUID.fromString(booking))).isEqualTo("AWAITING_PAYMENT");
+ }
  @Test void manualPixUsesBookingSnapshotAndExpiresWithoutExposingKey()throws Exception{
   var a=account();var start=publishAndFindStart(a);var c=client(a,start);var key=UUID.randomUUID();
   var response=reserve(a,c,key).andExpect(status().isCreated()).andReturn();String id=json.readTree(response.getResponse().getContentAsString()).get("id").asText();
@@ -35,7 +423,7 @@ class PublicPageJourneyIT {
   owner().update("UPDATE services SET price_cents=20000 WHERE tenant_id=?",a.tenant);
   String path="/api/v1/public/"+a.slug+"/client/bookings/"+id+"/payment";
   mvc.perform(get(path)).andExpect(status().isUnauthorized());
-  mvc.perform(get(path).cookie(c.cookie)).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.pixKey").value("private@example.test")).andExpect(jsonPath("$.recipientName").value("Recebedor teste")).andExpect(jsonPath("$.totalCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.remainingAfterDepositCents").value(5000)).andExpect(jsonPath("$.paymentAvailable").value(false));
+  mvc.perform(get(path).cookie(c.cookie)).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.pixKey").value("private@example.test")).andExpect(jsonPath("$.recipientName").value("Recebedor teste")).andExpect(jsonPath("$.totalCents").value(10000)).andExpect(jsonPath("$.depositCents").value(5000)).andExpect(jsonPath("$.remainingAfterDepositCents").value(5000)).andExpect(jsonPath("$.paymentAvailable").value(true));
   var other=client(a,java.time.Instant.parse(start).plusSeconds(1800).toString());reserve(a,other,UUID.randomUUID()).andExpect(status().isCreated());
   mvc.perform(get(path).cookie(other.cookie)).andExpect(status().isNotFound());
   owner().update("UPDATE public_profiles SET published=false WHERE tenant_id=?",a.tenant);
