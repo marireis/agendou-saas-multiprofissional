@@ -111,3 +111,12 @@ Resultado final: **144 testes distintos aprovados**, 36 unitários e 108 integra
 `@DirtiesContext(AFTER_CLASS)` nas jornadas fecha recursos pelo ciclo do Spring. A regressão final não repetiu os erros de tarefas em bancos removidos nem o término forçado da JVM. Uma tentativa intermediária de fechar o contexto manualmente foi interrompida por conflito com callbacks e corrigida; não conta como execução aprovada.
 
 TypeScript e sete verificações HTTP locais também passaram (`apps/web/integration-typecheck.log`, `.local/integration-http-check.log`). Build frontend não reexecutado; E2E visual/teclado/leitor/carga continuam pendentes. Consultar a [matriz de testes](matriz-testes-automatizados.md) para cobertura e limites. Próximo incremento: automação de navegador para as jornadas principais.
+
+
+## Evidência de navegador em 26/10/2026
+
+`npm run test:e2e` aprovado: dez cenários Chromium (desktop + Pixel 7 emulado), build de produção/TypeScript e conferência final no banco. Jornadas abrangem reserva pública, consulta por código, comprovante, confirmação, cancelamento/devolução, login/teclado/temas, navegação, clientes, recuperação genérica e acesso negado à plataforma. Axe passou nas telas selecionadas; corrigidos contraste no tema claro e rolagem do menu. Todos os 40 pedidos de leitura pública do ensaio limitado retornaram 200.
+
+Runbook: `runbooks/testes-navegador.md`. Relatórios em `apps/web/playwright-report` e `test-results`; resultado final em `apps/web/browser-validation.log` (08:55). A preparação usa contas sintéticas e infraestrutura descartável. Não valida transferências/mensagens reais, carga de produção, leitor de tela humano, aparelhos físicos ou todos os fluxos administrativos no navegador. Gates de privacidade, segurança/backup operacionais e piloto continuam abertos.
+
+Regressão completa backend de 26/10 também aprovada: 144 testes (36 unitários + 108 integrações), zero falhas/erros/ignorados; `apps/api/regression-20261026.log`, BUILD SUCCESS às 09:00.

@@ -104,7 +104,7 @@ class BookingRecoveryIT {
  private static HttpResponse<String> postJson(HttpClient client,String base,String path,String body)throws Exception{
   var csrf=csrfToken(client,base);return client.send(HttpRequest.newBuilder(URI.create(base+path)).header(csrf.get("headerName").asText(),csrf.get("token").asText()).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(),HttpResponse.BodyHandlers.ofString());
  }
- private static ServletWebServerApplicationContext start(PostgreSQLContainer<?> db,GenericContainer<?> files){
+ static ServletWebServerApplicationContext start(PostgreSQLContainer<?> db,GenericContainer<?> files){
   return (ServletWebServerApplicationContext)new SpringApplicationBuilder(br.com.agendou.ApiApplication.class).run(
    "--server.port=0","--server.servlet.session.cookie.secure=false","--spring.datasource.url="+db.getJdbcUrl(),"--spring.datasource.username=agendou_runtime","--spring.datasource.password=agendou_runtime_local_only",
    "--spring.flyway.url="+db.getJdbcUrl(),"--spring.flyway.user="+db.getUsername(),"--spring.flyway.password="+db.getPassword(),

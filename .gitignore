@@ -12,3 +12,7 @@ target/
 *.log
 *.tsbuildinfo
 exports/*.zip
+
+.next-e2e/
+playwright-report/
+test-results/

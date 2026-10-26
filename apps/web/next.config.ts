@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  distDir: process.env.AGENDOU_E2E === "1" ? ".next-e2e" : ".next",
   poweredByHeader: false,
   async headers() {
     // HTML pages only: preserve the API's private-file sandbox policy.

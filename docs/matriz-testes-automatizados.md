@@ -20,9 +20,14 @@ Esta matriz relaciona os fluxos implementados às suítes existentes. Aprovaçã
 | Backup de esquema/dados, permissões e objeto privado | `BackupRestoreIT` |
 | Reserva/comprovante vinculados, restauração e API reiniciada | `BookingRecoveryIT` |
 | Cabeçalhos HTML e recusa de acesso privado via proxy | `infra/local/verify-http-security.ps1` |
+| Jornadas Chromium desktop/mobile emulado, teclado, temas e Axe | `BrowserJourneyE2E`, `apps/web/e2e/journeys.spec.ts`; execução separada via `npm run test:e2e` |
 | Compilação do frontend e tipos | `npm run build` em `apps/web` |
 
-## Resultado em 22/10/2026
+## Resultado em 26/10/2026
+
+Regressão completa aprovada novamente: 36 unitários + 108 integrações, zero falhas/erros/ignorados; `apps/api/regression-20261026.log`, BUILD SUCCESS às 09:00. Execução separada de navegador aprovada: 10 cenários (5 desktop + 5 mobile emulado), build/TypeScript e asserções do harness sobre os registros no banco. `apps/web/browser-validation.log`, BUILD SUCCESS às 08:55. As repetições dos 36 unitários no comando de navegador não são testes distintos.
+
+## Resultado histórico em 22/10/2026
 
 144 testes distintos aprovados (36 unitários + 108 integrações), zero falhas/erros/ignorados. Log final: `apps/api/integration-regression-final.log`, BUILD SUCCESS às 19:45. TypeScript (`apps/web/integration-typecheck.log`) e sete checks HTTP (`.local/integration-http-check.log`) aprovados. Esses resultados não incluem E2E de navegador.
 
@@ -51,4 +56,4 @@ As jornadas Spring herdam `IsolatedSpringIntegrationTest`: `@DirtiesContext(AFTE
 
 A maior parte da regressão usa MockMvc com filtros de segurança e PostgreSQL real; algumas dependências são simuladas. `BookingRecoveryIT` usa MinIO real e HTTP real para código, sessão e download; configuração administrativa e conferência usam MockMvc com identidade sintética. Não simula transferência bancária real. A entrega SMTP é testada em Mailpit descartável, não em um provedor externo.
 
-Não há suíte E2E de navegador instalada no frontend. Build e HTTP não verificam cliques, aparência, teclado/leitor de tela ou comportamento em todos os dispositivos. Também não comprovam carga de produção, envio WhatsApp/SMS, recuperação de chave MFA em outro host ou procedimentos de exportação/exclusão ainda não implementados. Esses itens devem permanecer abertos até terem evidência própria.
+A suíte Playwright executa jornadas na interface com API, PostgreSQL e MinIO temporários reais; veja `runbooks/testes-navegador.md`. Cobre Chromium desktop e emulação Pixel 7, teclado e Axe em telas selecionadas. Não cobre todos os dispositivos/navegadores, leitor de tela humano nem todos os fluxos administrativos no navegador. MFA positivo e consumo do email de recuperação continuam cobertos no backend. Também não comprovam carga de produção, envio WhatsApp/SMS, recuperação de chave MFA em outro host ou procedimentos de exportação/exclusão ainda não implementados. Esses itens devem permanecer abertos até terem evidência própria.

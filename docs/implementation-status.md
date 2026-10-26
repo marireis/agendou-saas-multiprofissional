@@ -1,6 +1,18 @@
 # Agendou - Status de implementação
 
-**Atualizado em:** 22/10/2026. Desenvolvimento na própria pasta do projeto.
+**Atualizado em:** 26/10/2026. Desenvolvimento na própria pasta do projeto.
+
+## Entrega em 26/10: jornadas automatizadas no navegador (MVP-074 parcial)
+
+- **10 cenários Playwright aprovados**, cinco em Chromium desktop e cinco em emulação Pixel 7, sem falhas/ignorados na execução final. `npm run test:e2e`, BUILD SUCCESS às 08:55 em `apps/web/browser-validation.log`; build de produção Next.js/TypeScript e resultados em `apps/api/target/browser-e2e.log`. Harness Java também valida no banco duas reservas canceladas, dois comprovantes, dois recebimentos e duas devoluções. Seus testes unitários repetidos não são contados como testes novos.
+- Jornadas cobrem login válido/inválido, teclado, logout, proteção de área privada, persistência de tema, reserva pública sem email, código inválido/válido em nova sessão, upload/download de comprovante, recebimento/confirmação, cancelamento/devolução e consulta atualizada. Também navegam nas 12 abas administrativas, cadastram/editam cliente sem email, verificam resposta genérica de recuperação e negam plataforma a profissional comum.
+- API, PostgreSQL e MinIO reais em portas/contêineres temporários; frontend de produção separado em `.next-e2e`. Dados/volumes locais e chave MFA preservados. Execução reproduzível documentada em `runbooks/testes-navegador.md`.
+- Axe sem violações WCAG A/AA nas telas selecionadas: entrada nos dois temas, painel, recibo e cadastro. Corrigidos contraste do nome do negócio no tema claro e menu lateral sem rolagem que tornava abas inacessíveis em telas baixas. Falhas intermediárias de seletores/sincronização da automação foram corrigidas; anúncio de navegação do Next.js não é erro funcional.
+- Next.js atualizado para 16.4.3, dependências compatíveis corrigidas e auditoria npm de 25/10 com **zero vulnerabilidades reportadas**, evidência `.local/20261025-dependency-audit-final.json`. Não equivale a uma auditoria completa de segurança.
+- Dois ensaios limitados de leitura pública (20 requisições, concorrência 4 por projeto), todos HTTP 200, medições anexadas ao relatório Playwright. Não é teste de capacidade/SLO de produção. Mobile é emulado; Safari/aparelho físico, leitor de tela humano, MFA positivo e recuperação completa pelo navegador ainda não cobertos por esta suíte (os dois últimos têm integrações backend).
+- **Regressão completa do backend aprovada novamente em 26/10: 144 testes (36 unitários + 108 integrações), zero falhas/erros/ignorados**, BUILD SUCCESS às 09:00, 3min59s, em `apps/api/regression-20261026.log`. Inclui identidade/MFA, reservas, pagamentos, RLS, concorrência e recuperação.
+- Ambiente local iniciado em 26/10: Docker/PostgreSQL/MinIO/Mailpit, API 8080 e frontend dev 3000. `/entrar` e CSRF pelo proxy HTTP 200; `/api/v1/health` UP direto e pelo proxy. Sete verificações HTTP de cabeçalhos/recusa de financeiro anônimo aprovadas (`.local/http-check-20261026.log`). Logs: `apps/api/local-preview-api.log`, `apps/web/local-preview-web.log`. Dados e chave MFA existentes preservados.
+- **Próximos passos:** teste manual da responsável no ambiente local; depois privacidade operacional (MVP-071: exportação/exclusão/retenção), completar CSP/ingress, backups/segredos/cópia externa, runbooks de operação e homologação representativa. Produção/piloto, hospedagem/domínio, provedor WhatsApp/SMS e números comerciais dos planos permanecem pendentes por decisão da responsável. Não considerar todas as tarefas do projeto concluídas.
 
 ## Entrega em 22/10: reserva restaurada e regressão automatizada completa
 
